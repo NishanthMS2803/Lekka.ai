@@ -16,3 +16,5 @@ repos:
           - structlog>=24.0.0
           - sqlalchemy>=2.0.0
           - pytest>=8.0.0
+          - google-genai>=2.29.0
+          - tenacity>=9.0.0

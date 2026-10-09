@@ -42,6 +42,7 @@ class LLMResponse(BaseModel):
     text: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
+    structured_output: Any = None
     raw: Any = None
 
 
