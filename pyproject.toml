@@ -37,11 +37,22 @@ select = [
     "UP",
 ]
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
 [tool.mypy]
 python_version = "3.12"
-strict = true
+warn_return_any = true
 warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "lekka_ai.*"
+strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
