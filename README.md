@@ -1,3 +1,3 @@
 # Lekka AI
 
-AI-powered application.
+A multi-agent financial research system.
