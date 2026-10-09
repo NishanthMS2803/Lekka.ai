@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test
+.PHONY: install lint typecheck test db-up db-down db-logs
 
 install:
 	uv sync
@@ -12,3 +12,12 @@ typecheck:
 
 test:
 	uv run pytest
+
+db-up:
+	docker compose up -d
+
+db-down:
+	docker compose down
+
+db-logs:
+	docker compose logs -f db
