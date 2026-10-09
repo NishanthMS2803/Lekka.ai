@@ -9,9 +9,11 @@ from lekka_ai.llm.base import (
     Usage,
 )
 from lekka_ai.llm.fake import FakeLLM
+from lekka_ai.llm.gemini import GeminiClient
 
 __all__ = [
     "FakeLLM",
+    "GeminiClient",
     "LLMClient",
     "LLMResponse",
     "Message",
