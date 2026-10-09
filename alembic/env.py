@@ -3,6 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+import lekka_ai.db.models  # noqa: F401
 from lekka_ai.config import get_settings
 from lekka_ai.db.base import Base
 
