@@ -27,7 +27,7 @@ jobs:
           --health-retries 5
 
     env:
-      ENV: test
+      ENV: development
       DATABASE_URL: postgresql+psycopg://lekka_ai:lekka_ai@localhost:5432/lekka_ai
       GEMINI_API_KEY: ci-test-key
       GEMINI_MODEL: gemini-3.8-flash

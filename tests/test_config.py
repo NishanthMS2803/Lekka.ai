@@ -31,8 +31,9 @@ def test_missing_required_settings_raises_validation_error(
     assert "SEC_USER_AGENT" in missing_fields
 
 
-def test_valid_settings_instantiation() -> None:
+def test_valid_settings_instantiation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Instantiating Settings with all required fields succeeds."""
+    monkeypatch.delenv("ENV", raising=False)
     settings = Settings(
         _env_file=None,
         DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/lekka",
