@@ -1,17 +1,18 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# Node / dependencies
-node_modules
-dist
-dist-ssr
-*.local
+# Node
+node_modules/
+dist/
+dist-ssr/
 
 # Environment variables
 .env
@@ -19,15 +20,11 @@ dist-ssr
 !.env.example
 
 # Editor / OS
-.vscode/*
-!.vscode/extensions.json
-.idea
+.idea/
+.vscode/
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 
-# Temporary / scratch
-scratch
+# Temporary
+scratch/
+logs/
+*.log

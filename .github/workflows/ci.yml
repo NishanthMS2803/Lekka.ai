@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Lint, Typecheck, Migrate & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lekka_ai
+          POSTGRES_PASSWORD: lekka_ai
+          POSTGRES_DB: lekka_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lekka_ai -d lekka_ai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      ENV: development
+      DATABASE_URL: postgresql+psycopg://lekka_ai:lekka_ai@localhost:5432/lekka_ai
+      GEMINI_API_KEY: ci-test-key
+      GEMINI_MODEL: gemini-3.8-flash
+      GEMINI_EMBEDDING_MODEL: text-embedding-004
+      SEC_USER_AGENT: LekkaAI research@lekka.ai
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint with Ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Typecheck with Mypy
+        run: uv run mypy src tests
+
+      - name: Run Alembic migrations
+        run: uv run alembic upgrade head
+
+      - name: Run Pytest suite
+        run: uv run pytest
