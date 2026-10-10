@@ -1,5 +1,6 @@
 """Data layer and ingestion clients for Lekka AI."""
 
+from lekka_ai.data.cache import Cache
 from lekka_ai.data.http import (
     AsyncHttpClient,
     HostRateLimiter,
@@ -10,6 +11,7 @@ from lekka_ai.data.http import (
 
 __all__ = [
     "AsyncHttpClient",
+    "Cache",
     "HostRateLimiter",
     "RetryableHTTPStatusError",
     "TokenBucket",

@@ -118,3 +118,21 @@ class ToolCall(Base):
     )
 
     agent_run: Mapped["AgentRun"] = relationship(back_populates="tool_calls")
+
+
+class ToolCache(Base):
+    """Cached response for external tools and APIs with TTL policies."""
+
+    __tablename__ = "tool_cache"
+
+    key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    value_json: Mapped[dict[str, Any] | list[Any] | Any] = mapped_column(
+        JSONB, nullable=False
+    )
+    fact_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
