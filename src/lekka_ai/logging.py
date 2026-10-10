@@ -93,6 +93,11 @@ def bind_agent_id(agent_id: str) -> None:
     structlog.contextvars.bind_contextvars(agent_id=agent_id)
 
 
+def bind_request_id(request_id: str) -> None:
+    """Bind request_id to current logging context."""
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+
+
 def clear_context() -> None:
     """Clear all bound context variables."""
     structlog.contextvars.clear_contextvars()

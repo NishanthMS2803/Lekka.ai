@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test db-up db-down db-logs
+.PHONY: install lint typecheck test run db-up db-down db-logs
 
 install:
 	uv sync
@@ -12,6 +12,9 @@ typecheck:
 
 test:
 	uv run pytest
+
+run:
+	uv run uvicorn lekka_ai.api.app:app --host 0.0.0.0 --port 8000 --reload
 
 db-up:
 	docker compose up -d
