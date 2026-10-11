@@ -143,6 +143,8 @@ class SecClient:
             f"Ticker '{ticker}' not found in SEC company tickers database."
         )
 
+    lookup_cik = get_cik
+
     async def get_submissions(self, cik: str) -> dict[str, Any]:
         """Fetch company submissions metadata for a given CIK from SEC EDGAR.
 

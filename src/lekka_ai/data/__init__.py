@@ -23,6 +23,7 @@ from lekka_ai.data.http import (
     TokenBucket,
     create_http_client,
 )
+from lekka_ai.data.ingest import ingest_filings_for_ticker
 from lekka_ai.data.market import (
     CsvFixtureProvider,
     MarketDataError,
@@ -75,6 +76,7 @@ __all__ = [
     "count_tokens",
     "create_http_client",
     "get_section",
+    "ingest_filings_for_ticker",
     "parse_company_facts",
     "parse_filing_document",
     "split_filing_sections",

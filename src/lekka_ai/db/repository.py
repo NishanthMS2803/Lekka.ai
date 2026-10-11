@@ -1,13 +1,17 @@
 """Database repository helpers for research runs."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
-from lekka_ai.data.chunking import FilingChunkData
 from lekka_ai.db.models import AgentRun, Filing, FilingChunk, Run, Task, ToolCall
+
+if TYPE_CHECKING:
+    from lekka_ai.data.chunking import FilingChunkData
 
 
 def create_run(
@@ -295,8 +299,21 @@ def find_similar_chunks(
     limit: int = 5,
     ticker: str | None = None,
     section_name: str | None = None,
+    sections: list[str] | None = None,
+    form_types: list[str] | None = None,
+    as_of_date: date | None = None,
 ) -> list[tuple[FilingChunk, float]]:
     """Find most similar filing chunks using cosine distance (<=>).
+
+    Args:
+        session: Active SQLAlchemy session.
+        query_embedding: Embedding vector for similarity search.
+        limit: Maximum number of chunks to return.
+        ticker: Optional ticker symbol filter.
+        section_name: Optional single section name filter.
+        sections: Optional list of section names filter.
+        form_types: Optional list of form types (e.g. ['10-K', '10-Q']).
+        as_of_date: Optional point-in-time cutoff date.
 
     Returns:
         List of tuples: (FilingChunk, distance).
@@ -311,6 +328,16 @@ def find_similar_chunks(
         stmt = stmt.where(FilingChunk.ticker == ticker.strip().upper())
     if section_name:
         stmt = stmt.where(FilingChunk.section_name == section_name.strip())
+    if sections:
+        norm_sections = [s.strip() for s in sections if s.strip()]
+        if norm_sections:
+            stmt = stmt.where(FilingChunk.section_name.in_(norm_sections))
+    if form_types:
+        norm_forms = [f.strip().upper() for f in form_types if f.strip()]
+        if norm_forms:
+            stmt = stmt.where(FilingChunk.form.in_(norm_forms))
+    if as_of_date:
+        stmt = stmt.where(FilingChunk.filing_date <= as_of_date)
 
     stmt = stmt.order_by(distance_col).limit(limit)
     rows = session.execute(stmt).all()

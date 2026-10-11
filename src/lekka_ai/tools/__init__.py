@@ -31,9 +31,17 @@ from lekka_ai.tools.risk import (
     ComputeRiskStatsTool,
     RiskStatsTool,
 )
+from lekka_ai.tools.search_filings import (
+    Citation,
+    Passage,
+    SearchFilingsInput,
+    SearchFilingsOutput,
+    SearchFilingsTool,
+)
 
 __all__ = [
     "Cache",
+    "Citation",
     "CompactBar",
     "ComputeRiskStatsInput",
     "ComputeRiskStatsOutput",
@@ -56,7 +64,11 @@ __all__ = [
     "ListFilingsTool",
     "MarketDataTool",
     "MarketSummary",
+    "Passage",
     "RiskStatsTool",
+    "SearchFilingsInput",
+    "SearchFilingsOutput",
+    "SearchFilingsTool",
     "TTL_POLICIES",
     "Tool",
     "ToolRegistry",

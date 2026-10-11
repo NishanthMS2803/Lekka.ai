@@ -1,4 +1,6 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs
+.PHONY: install lint typecheck test run db-up db-down db-logs ingest
+
+TICKER ?= AAPL
 
 install:
 	uv sync
@@ -24,3 +26,7 @@ db-down:
 
 db-logs:
 	docker compose logs -f db
+
+ingest:
+	uv run python -m lekka_ai.data.ingest --ticker $(TICKER)
+
