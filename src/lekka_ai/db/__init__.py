@@ -1,17 +1,28 @@
 """Database layer for Lekka AI."""
 
 from lekka_ai.db.base import Base
-from lekka_ai.db.models import AgentRun, Filing, Run, Task, ToolCache, ToolCall
+from lekka_ai.db.models import (
+    AgentRun,
+    Filing,
+    FilingChunk,
+    Run,
+    Task,
+    ToolCache,
+    ToolCall,
+)
 from lekka_ai.db.repository import (
     create_agent_run,
     create_filing_record,
     create_run,
     create_task,
     create_tool_call,
+    find_similar_chunks,
+    get_filing_chunks,
     get_filing_section,
     get_filing_sections,
     get_run,
     get_tool_call,
+    save_filing_chunks,
     save_filing_document,
 )
 from lekka_ai.db.session import (
@@ -24,6 +35,7 @@ __all__ = [
     "AgentRun",
     "Base",
     "Filing",
+    "FilingChunk",
     "Run",
     "Task",
     "ToolCache",
@@ -33,12 +45,15 @@ __all__ = [
     "create_run",
     "create_task",
     "create_tool_call",
+    "find_similar_chunks",
     "get_engine",
+    "get_filing_chunks",
     "get_filing_section",
     "get_filing_sections",
     "get_run",
     "get_session",
     "get_session_factory",
     "get_tool_call",
+    "save_filing_chunks",
     "save_filing_document",
 ]

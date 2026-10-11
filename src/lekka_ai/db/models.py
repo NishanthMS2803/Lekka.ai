@@ -4,7 +4,18 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -155,4 +166,47 @@ class Filing(Base):
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class FilingChunk(Base):
+    """Text chunk of an SEC filing section with embeddings for vector search."""
+
+    __tablename__ = "filing_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    filing_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("filings.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    form: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    filing_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    accession: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    section_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_filing_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_filing_chunks_ticker_accession_section",
+            "ticker",
+            "accession",
+            "section_name",
+        ),
     )

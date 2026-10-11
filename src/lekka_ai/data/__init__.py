@@ -1,6 +1,15 @@
 """Data layer and ingestion clients for Lekka AI."""
 
 from lekka_ai.data.cache import Cache
+from lekka_ai.data.chunking import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    FilingChunkData,
+    chunk_filing_document,
+    chunk_filing_section,
+    chunk_text,
+    count_tokens,
+)
 from lekka_ai.data.filings import (
     clean_html_to_text,
     get_section,
@@ -43,7 +52,10 @@ __all__ = [
     "CompanyFactsParser",
     "CompanyFactsResult",
     "CsvFixtureProvider",
+    "DEFAULT_CHUNK_OVERLAP",
+    "DEFAULT_CHUNK_SIZE",
     "DEFAULT_TAG_FALLBACKS",
+    "FilingChunkData",
     "HostRateLimiter",
     "MarketDataError",
     "MarketDataProvider",
@@ -56,7 +68,11 @@ __all__ = [
     "TickerNotFoundError",
     "TokenBucket",
     "YFinanceProvider",
+    "chunk_filing_document",
+    "chunk_filing_section",
+    "chunk_text",
     "clean_html_to_text",
+    "count_tokens",
     "create_http_client",
     "get_section",
     "parse_company_facts",

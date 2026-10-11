@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     GEMINI_EMBEDDING_MODEL: str = Field(
         ..., description="Gemini text embedding model name"
     )
+    EMBEDDING_DIMENSION: int = Field(
+        default=768,
+        description="Dimension of embeddings matching GEMINI_EMBEDDING_MODEL",
+    )
     SEC_USER_AGENT: str = Field(
         ..., description="User-Agent header required for SEC EDGAR queries"
     )

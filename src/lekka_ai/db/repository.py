@@ -6,7 +6,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from lekka_ai.db.models import AgentRun, Filing, Run, Task, ToolCall
+from lekka_ai.data.chunking import FilingChunkData
+from lekka_ai.db.models import AgentRun, Filing, FilingChunk, Run, Task, ToolCall
 
 
 def create_run(
@@ -223,3 +224,94 @@ def save_filing_document(
     for r in records:
         session.refresh(r)
     return records
+
+
+def save_filing_chunks(
+    session: Session,
+    *,
+    chunks: list[FilingChunkData],
+    embeddings: list[list[float]] | None = None,
+    filing_id: uuid.UUID | None = None,
+) -> list[FilingChunk]:
+    """Save filing chunks with optional embeddings in a single transaction."""
+    if not chunks:
+        return []
+
+    if embeddings is not None and len(embeddings) != len(chunks):
+        raise ValueError(
+            f"Embeddings count ({len(embeddings)}) does not match "
+            f"chunks count ({len(chunks)})"
+        )
+
+    records: list[FilingChunk] = []
+    for idx, c in enumerate(chunks):
+        emb = embeddings[idx] if embeddings is not None else None
+        record = FilingChunk(
+            filing_id=filing_id,
+            ticker=c.ticker.strip().upper(),
+            form=c.form.strip().upper(),
+            filing_date=c.filing_date,
+            accession=c.accession.strip(),
+            section_name=c.section_name.strip(),
+            chunk_index=c.chunk_index,
+            text=c.text,
+            token_count=c.token_count,
+            embedding=emb,
+        )
+        session.add(record)
+        records.append(record)
+
+    session.commit()
+    for r in records:
+        session.refresh(r)
+    return records
+
+
+def get_filing_chunks(
+    session: Session,
+    *,
+    ticker: str,
+    accession: str,
+    section_name: str | None = None,
+) -> list[FilingChunk]:
+    """Retrieve chunks for a filing, optionally filtered by section name."""
+    from sqlalchemy import select
+
+    stmt = select(FilingChunk).where(
+        FilingChunk.ticker == ticker.strip().upper(),
+        FilingChunk.accession == accession.strip(),
+    )
+    if section_name:
+        stmt = stmt.where(FilingChunk.section_name == section_name.strip())
+
+    stmt = stmt.order_by(FilingChunk.section_name, FilingChunk.chunk_index)
+    return list(session.execute(stmt).scalars().all())
+
+
+def find_similar_chunks(
+    session: Session,
+    *,
+    query_embedding: list[float],
+    limit: int = 5,
+    ticker: str | None = None,
+    section_name: str | None = None,
+) -> list[tuple[FilingChunk, float]]:
+    """Find most similar filing chunks using cosine distance (<=>).
+
+    Returns:
+        List of tuples: (FilingChunk, distance).
+    """
+    from sqlalchemy import select
+
+    distance_col = FilingChunk.embedding.cosine_distance(query_embedding).label(
+        "distance"
+    )
+    stmt = select(FilingChunk, distance_col).where(FilingChunk.embedding.isnot(None))
+    if ticker:
+        stmt = stmt.where(FilingChunk.ticker == ticker.strip().upper())
+    if section_name:
+        stmt = stmt.where(FilingChunk.section_name == section_name.strip())
+
+    stmt = stmt.order_by(distance_col).limit(limit)
+    rows = session.execute(stmt).all()
+    return [(row[0], float(row[1])) for row in rows]
