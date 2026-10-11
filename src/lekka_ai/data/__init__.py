@@ -25,6 +25,7 @@ from lekka_ai.data.xbrl import (
     DEFAULT_TAG_FALLBACKS,
     CompanyFactsParser,
     CompanyFactsResult,
+    MetricSource,
     PeriodFinancials,
     parse_company_facts,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "HostRateLimiter",
     "MarketDataError",
     "MarketDataProvider",
+    "MetricSource",
     "PaidMarketDataProvider",
     "PeriodFinancials",
     "RetryableHTTPStatusError",

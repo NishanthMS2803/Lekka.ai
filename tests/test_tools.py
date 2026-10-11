@@ -341,3 +341,161 @@ async def test_list_filings_registered() -> None:
     assert "form_types" in props
     assert "limit" in props
     assert "as_of_date" in props
+
+
+@pytest.mark.asyncio
+async def test_get_financials_tool_fixture_and_derived_metrics() -> None:
+    """Verify get_financials returns facts matching hand calculations."""
+    import json
+    from pathlib import Path
+
+    import httpx
+
+    from lekka_ai.data.http import create_http_client
+    from lekka_ai.data.sec import SecClient
+    from lekka_ai.tools import GetFinancialsInput, GetFinancialsTool
+
+    facts_path = Path(__file__).parent / "fixtures" / "AAPL_company_facts.json"
+    with open(facts_path, encoding="utf-8") as f:
+        aapl_facts_data = json.load(f)
+
+    tickers_data = {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        if "company_tickers.json" in url_str:
+            return httpx.Response(200, json=tickers_data, request=request)
+        if "companyfacts" in url_str:
+            return httpx.Response(200, json=aapl_facts_data, request=request)
+        return httpx.Response(404, request=request)
+
+    transport = httpx.MockTransport(handler)
+    http_client = create_http_client(transport=transport)
+    sec_client = SecClient(http_client=http_client)
+    tool = GetFinancialsTool(sec_client=sec_client)
+
+    # 1. Query for recent 4 annual periods
+    output = await tool.run(
+        GetFinancialsInput(ticker="AAPL", periods=4, period_type="annual")
+    )
+
+    assert output.ticker == "AAPL"
+    assert output.cik == "0000320193"
+    assert output.company_name == "Apple Inc."
+    assert len(output.periods) == 4
+
+    # Periods are returned newest first: 2024, 2023, 2022, 2021
+    years = [p.fy for p in output.periods]
+    assert years == [2024, 2023, 2022, 2021]
+
+    # Verify 2023 FY period standardized metrics
+    fy23 = output.periods[1]
+    assert fy23.fy == 2023
+    assert fy23.fp == "FY"
+    assert fy23.filed_date == "2023-11-03"
+    assert fy23.form == "10-K"
+
+    assert fy23.revenues == 383_285_000_000
+    assert fy23.operating_income == 114_301_000_000
+    assert fy23.net_income == 96_995_000_000
+    assert fy23.operating_cash_flow == 110_543_000_000
+    assert fy23.capex == 10_959_000_000
+    assert fy23.cash_and_cash_equivalents == 29_965_000_000
+    assert fy23.debt == 95_281_000_000
+
+    # Source info with accession number, filed date, and tag
+    assert "revenues" in fy23.source_info
+    rev_source = fy23.source_info["revenues"]
+    assert rev_source.tag == "RevenueFromContractWithCustomerExcludingAssessedTax"
+    assert rev_source.accession_number == "0000320193-23-000106"
+    assert rev_source.filed_date == "2023-11-03"
+    assert rev_source.form == "10-K"
+
+    # Verify derived metrics against exact hand calculations:
+    # 1. Revenue YoY: (383_285 - 394_328) / 394_328 = -0.0280046... (-2.800%)
+    expected_rev_yoy = (383_285_000_000 - 394_328_000_000) / 394_328_000_000
+    assert fy23.revenue_yoy == pytest.approx(expected_rev_yoy, abs=1e-6)
+    assert fy23["revenue_yoy"] == pytest.approx(expected_rev_yoy, abs=1e-6)
+
+    # 2. Operating margin: 114_301 / 383_285 = 0.298214... (29.821%)
+    expected_op_margin = 114_301_000_000 / 383_285_000_000
+    assert fy23.operating_margin == pytest.approx(expected_op_margin, abs=1e-6)
+    assert fy23["operating_margin"] == pytest.approx(expected_op_margin, abs=1e-6)
+
+    # 3. Net margin: 96_995 / 383_285 = 0.253062... (25.306%)
+    expected_net_margin = 96_995_000_000 / 383_285_000_000
+    assert fy23.net_margin == pytest.approx(expected_net_margin, abs=1e-6)
+
+    # 4. Free cash flow: 110_543 - 10_959 = 99_584_000_000 ($99.584B)
+    assert fy23.free_cash_flow == 99_584_000_000
+    assert fy23["free_cash_flow"] == 99_584_000_000
+
+    # 5. Net debt: 95_281 - 29_965 = 65_316_000_000 ($65.316B)
+    assert fy23.net_debt == 65_316_000_000
+    assert fy23["net_debt"] == 65_316_000_000
+
+
+@pytest.mark.asyncio
+async def test_get_financials_as_of_date_filter() -> None:
+    """Verify point-in-time filter excludes any facts filed after as_of_date."""
+    import json
+    from pathlib import Path
+
+    import httpx
+
+    from lekka_ai.data.http import create_http_client
+    from lekka_ai.data.sec import SecClient
+    from lekka_ai.tools import GetFinancialsInput, GetFinancialsTool
+
+    facts_path = Path(__file__).parent / "fixtures" / "AAPL_company_facts.json"
+    with open(facts_path, encoding="utf-8") as f:
+        aapl_facts_data = json.load(f)
+
+    tickers_data = {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        if "company_tickers.json" in url_str:
+            return httpx.Response(200, json=tickers_data, request=request)
+        if "companyfacts" in url_str:
+            return httpx.Response(200, json=aapl_facts_data, request=request)
+        return httpx.Response(404, request=request)
+
+    transport = httpx.MockTransport(handler)
+    http_client = create_http_client(transport=transport)
+    sec_client = SecClient(http_client=http_client)
+    tool = GetFinancialsTool(sec_client=sec_client)
+
+    # Filter as of 2022-12-31: 2023 and 2024 must NOT appear
+    output = await tool.run(
+        GetFinancialsInput(
+            ticker="AAPL", periods=5, as_of_date="2022-12-31", period_type="annual"
+        )
+    )
+
+    for p in output.periods:
+        assert p.filed_date is not None
+        assert p.filed_date <= "2022-12-31"
+
+    returned_years = [p.fy for p in output.periods]
+    assert 2023 not in returned_years
+    assert 2024 not in returned_years
+    assert 2022 in returned_years
+    assert 2021 in returned_years
+
+
+@pytest.mark.asyncio
+async def test_get_financials_registered() -> None:
+    """get_financials is registered in default_registry and exports valid schema."""
+    from lekka_ai.tools import default_registry
+
+    tool = default_registry.get("get_financials")
+    assert tool is not None
+    assert tool.name == "get_financials"
+    spec = tool.to_spec()
+    assert spec.name == "get_financials"
+    props = spec.json_schema.get("properties", {})
+    assert "ticker" in props
+    assert "periods" in props
+    assert "as_of_date" in props
+    assert "period_type" in props

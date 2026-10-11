@@ -1,5 +1,14 @@
 """Quantitative analysis and statistical modules for Lekka AI."""
 
+from lekka_ai.quant.fundamentals import (
+    DerivedFinancials,
+    compute_derived_financials,
+    free_cash_flow,
+    net_debt,
+    net_margin,
+    operating_margin,
+    yoy_growth,
+)
 from lekka_ai.quant.stats import (
     MaxDrawdownResult,
     align_series,
@@ -21,16 +30,22 @@ from lekka_ai.quant.stats import (
 )
 
 __all__ = [
+    "DerivedFinancials",
     "MaxDrawdownResult",
     "align_series",
     "annualized_volatility",
     "beta",
+    "compute_derived_financials",
     "correlation",
     "ema",
     "exponential_moving_average",
+    "free_cash_flow",
     "log_returns",
     "max_drawdown",
     "moving_average",
+    "net_debt",
+    "net_margin",
+    "operating_margin",
     "period_return",
     "period_returns",
     "relative_strength",
@@ -38,4 +53,5 @@ __all__ = [
     "simple_moving_average",
     "simple_returns",
     "sma",
+    "yoy_growth",
 ]

@@ -10,6 +10,13 @@ from lekka_ai.tools.filings import (
     ListFilingsOutput,
     ListFilingsTool,
 )
+from lekka_ai.tools.financials import (
+    FinancialPeriodSummary,
+    FinancialsTool,
+    GetFinancialsInput,
+    GetFinancialsOutput,
+    GetFinancialsTool,
+)
 from lekka_ai.tools.market import (
     CompactBar,
     GetMarketDataInput,
@@ -36,6 +43,11 @@ __all__ = [
     "EchoTool",
     "FilingItem",
     "FilingsTool",
+    "FinancialPeriodSummary",
+    "FinancialsTool",
+    "GetFinancialsInput",
+    "GetFinancialsOutput",
+    "GetFinancialsTool",
     "GetMarketDataInput",
     "GetMarketDataOutput",
     "GetMarketDataTool",

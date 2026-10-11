@@ -7,16 +7,22 @@ import pandas as pd
 import pytest
 
 from lekka_ai.quant import (
+    DerivedFinancials,
     MaxDrawdownResult,
     align_series,
     annualized_volatility,
     beta,
+    compute_derived_financials,
     correlation,
     ema,
     exponential_moving_average,
+    free_cash_flow,
     log_returns,
     max_drawdown,
     moving_average,
+    net_debt,
+    net_margin,
+    operating_margin,
     period_return,
     period_returns,
     relative_strength,
@@ -24,6 +30,7 @@ from lekka_ai.quant import (
     simple_moving_average,
     simple_returns,
     sma,
+    yoy_growth,
 )
 
 
@@ -312,3 +319,150 @@ def test_zero_variance_benchmark() -> None:
 
     assert beta(stock, bench) == 0.0
     assert correlation(stock, bench) == 0.0
+
+
+def test_yoy_growth_hand_computed() -> None:
+    """Verify YoY growth against exact manual calculations."""
+    # Positive growth: (120 - 100) / 100 = +20%
+    assert yoy_growth(120, 100) == pytest.approx(0.20, abs=1e-6)
+
+    # Negative growth: (90 - 100) / 100 = -10%
+    assert yoy_growth(90, 100) == pytest.approx(-0.10, abs=1e-6)
+
+    # Negative prior base improving: (-50 - (-100)) / 100 = +50%
+    assert yoy_growth(-50, -100) == pytest.approx(0.50, abs=1e-6)
+
+    # Edge cases
+    assert yoy_growth(100, 0) is None
+    assert yoy_growth(None, 100) is None
+    assert yoy_growth(100, None) is None
+    assert yoy_growth(None, None) is None
+
+
+def test_operating_margin_hand_computed() -> None:
+    """Verify operating margin: operating_income / revenues."""
+    # Hand-checked: 25 / 100 = 0.25 (25%)
+    assert operating_margin(25, 100) == pytest.approx(0.25, abs=1e-6)
+
+    # Apple FY23 numbers: 114_301_000_000 / 383_285_000_000
+    expected = 114_301_000_000 / 383_285_000_000  # ~0.298214
+    assert operating_margin(114_301_000_000, 383_285_000_000) == pytest.approx(
+        expected, abs=1e-6
+    )
+
+    # Operating loss: -15 / 100 = -0.15
+    assert operating_margin(-15, 100) == pytest.approx(-0.15, abs=1e-6)
+
+    # Edge cases
+    assert operating_margin(10, 0) is None
+    assert operating_margin(None, 100) is None
+    assert operating_margin(10, None) is None
+
+
+def test_net_margin_hand_computed() -> None:
+    """Verify net margin: net_income / revenues."""
+    # Hand-checked: 20 / 100 = 0.20 (20%)
+    assert net_margin(20, 100) == pytest.approx(0.20, abs=1e-6)
+
+    # Apple FY23 numbers: 96_995_000_000 / 383_285_000_000
+    expected = 96_995_000_000 / 383_285_000_000  # ~0.253062
+    assert net_margin(96_995_000_000, 383_285_000_000) == pytest.approx(
+        expected, abs=1e-6
+    )
+
+    # Net loss: -5 / 100 = -0.05
+    assert net_margin(-5, 100) == pytest.approx(-0.05, abs=1e-6)
+
+    # Edge cases
+    assert net_margin(10, 0) is None
+    assert net_margin(None, 100) is None
+    assert net_margin(10, None) is None
+
+
+def test_free_cash_flow_hand_computed() -> None:
+    """Verify FCF: CFO minus Capex."""
+    # Hand-checked: 100 - 30 = 70
+    assert free_cash_flow(100, 30) == 70
+
+    # Apple FY23 numbers: 110_543_000_000 - 10_959_000_000 = 99_584_000_000
+    assert free_cash_flow(110_543_000_000, 10_959_000_000) == 99_584_000_000
+
+    # Negative capex input formatted as outflow: CFO 100, Capex -30 -> 70
+    assert free_cash_flow(100, -30) == 70
+
+    # Negative CFO (cash burn): -20 - 30 = -50
+    assert free_cash_flow(-20, 30) == -50
+
+    # Edge cases
+    assert free_cash_flow(None, 30) is None
+    assert free_cash_flow(100, None) is None
+
+
+def test_net_debt_hand_computed() -> None:
+    """Verify Net Debt: Debt minus Cash."""
+    # Hand-checked: 100 - 40 = 60
+    assert net_debt(100, 40) == 60
+
+    # Net cash position (cash exceeds debt): 30 - 50 = -20
+    assert net_debt(30, 50) == -20
+
+    # Apple FY23 numbers: 95_281_000_000 - 29_965_000_000 = 65_316_000_000
+    assert net_debt(95_281_000_000, 29_965_000_000) == 65_316_000_000
+
+    # Edge cases
+    assert net_debt(None, None) is None
+    assert net_debt(100, None) == 100
+    assert net_debt(None, 50) == -50
+
+
+def test_compute_derived_financials_hand_computed() -> None:
+    """Verify compute_derived_financials integrates all metrics correctly."""
+    from lekka_ai.data.xbrl import PeriodFinancials
+
+    fy22 = PeriodFinancials(
+        fy=2022,
+        fp="FY",
+        revenues=394_328_000_000,
+        net_income=99_803_000_000,
+        operating_income=119_437_000_000,
+        operating_cash_flow=122_151_000_000,
+        capex=10_708_000_000,
+        cash_and_cash_equivalents=23_646_000_000,
+        debt=98_959_000_000,
+    )
+    fy23 = PeriodFinancials(
+        fy=2023,
+        fp="FY",
+        revenues=383_285_000_000,
+        net_income=96_995_000_000,
+        operating_income=114_301_000_000,
+        operating_cash_flow=110_543_000_000,
+        capex=10_959_000_000,
+        cash_and_cash_equivalents=29_965_000_000,
+        debt=95_281_000_000,
+    )
+
+    derived = compute_derived_financials(current=fy23, prior=fy22)
+    assert isinstance(derived, DerivedFinancials)
+
+    # YoY revenue: (383_285 - 394_328) / 394_328 = -2.80%
+    expected_rev_yoy = (383_285_000_000 - 394_328_000_000) / 394_328_000_000
+    assert derived.revenue_yoy == pytest.approx(expected_rev_yoy, abs=1e-6)
+
+    # YoY net income: (96_995 - 99_803) / 99_803 = -2.813%
+    expected_ni_yoy = (96_995_000_000 - 99_803_000_000) / 99_803_000_000
+    assert derived.net_income_yoy == pytest.approx(expected_ni_yoy, abs=1e-6)
+
+    # Operating margin: 114_301 / 383_285 = 29.82%
+    expected_op_margin = 114_301_000_000 / 383_285_000_000
+    assert derived.operating_margin == pytest.approx(expected_op_margin, abs=1e-6)
+
+    # Net margin: 96_995 / 383_285 = 25.31%
+    expected_net_margin = 96_995_000_000 / 383_285_000_000
+    assert derived.net_margin == pytest.approx(expected_net_margin, abs=1e-6)
+
+    # Free cash flow: 110_543 - 10_959 = 99_584
+    assert derived.free_cash_flow == 99_584_000_000
+
+    # Net debt: 95_281 - 29_965 = 65_316
+    assert derived.net_debt == 65_316_000_000

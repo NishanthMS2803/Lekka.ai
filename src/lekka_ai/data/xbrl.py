@@ -67,6 +67,21 @@ DEFAULT_TAG_FALLBACKS: dict[str, list[str]] = {
 }
 
 
+class MetricSource(BaseModel):
+    """Source provenance metadata for an extracted XBRL fact."""
+
+    model_config = ConfigDict(extra="allow")
+
+    tag: str = Field(..., description="XBRL concept tag resolved")
+    accession_number: str | None = Field(
+        default=None, description="SEC filing accession number"
+    )
+    filed_date: str | None = Field(
+        default=None, description="Filing submission date (YYYY-MM-DD)"
+    )
+    form: str | None = Field(default=None, description="SEC filing form")
+
+
 class PeriodFinancials(BaseModel):
     """Normalized financial statements facts for a single fiscal period."""
 
@@ -112,6 +127,10 @@ class PeriodFinancials(BaseModel):
     # Provenance metadata: maps canonical metric to the actual XBRL tag resolved
     tag_sources: dict[str, str] = Field(
         default_factory=dict, description="Resolved XBRL tag name per metric"
+    )
+    sources: dict[str, MetricSource] = Field(
+        default_factory=dict,
+        description="Detailed source provenance per metric",
     )
 
     @property
@@ -184,6 +203,7 @@ class PeriodFinancials(BaseModel):
             "fp": self.fp,
             "form": self.form,
             "tag_sources": self.tag_sources,
+            "sources": self.sources,
         }
         if norm in key_map:
             return key_map[norm]
@@ -361,6 +381,7 @@ class CompanyFactsParser:
 
         extracted_values: dict[str, Any] = {}
         tag_sources: dict[str, str] = {}
+        sources: dict[str, MetricSource] = {}
         primary_filed: str | None = None
         primary_end: str | None = None
         primary_form: str | None = None
@@ -442,6 +463,12 @@ class CompanyFactsParser:
                 if chosen is not None and "val" in chosen:
                     extracted_values[metric_name] = chosen["val"]
                     tag_sources[metric_name] = tag
+                    sources[metric_name] = MetricSource(
+                        tag=tag,
+                        accession_number=chosen.get("accn"),
+                        filed_date=chosen.get("filed"),
+                        form=chosen.get("form"),
+                    )
 
                     filed_val = chosen.get("filed")
                     if filed_val and (not primary_filed or filed_val > primary_filed):
@@ -472,6 +499,7 @@ class CompanyFactsParser:
             cash_and_cash_equivalents=extracted_values.get("cash_and_cash_equivalents"),
             debt=extracted_values.get("debt"),
             tag_sources=tag_sources,
+            sources=sources,
         )
 
 
