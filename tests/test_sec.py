@@ -120,6 +120,40 @@ def test_sec_client_rate_limit_validation() -> None:
         SecClient(rate_limit=15.0)
 
 
+@pytest.mark.asyncio
+async def test_sec_client_get_company_facts() -> None:
+    """SecClient.get_company_facts requests zero-padded CIK URL and returns JSON."""
+    captured: list[httpx.Request] = []
+    fake_facts = {
+        "cik": 320193,
+        "entityName": "Apple Inc.",
+        "facts": {"us-gaap": {}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            status_code=200,
+            headers={"Content-Type": "application/json"},
+            content=json.dumps(fake_facts).encode("utf-8"),
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = create_http_client(transport=transport)
+    sec_client = SecClient(http_client=http_client)
+
+    result = await sec_client.get_company_facts("320193")
+    assert result["cik"] == 320193
+    assert result["entityName"] == "Apple Inc."
+
+    assert len(captured) == 1
+    req = captured[0]
+    assert (
+        str(req.url) == "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"
+    )
+
+
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_sec_client_live_aapl_cik() -> None:
@@ -133,3 +167,8 @@ async def test_sec_client_live_aapl_cik() -> None:
         name = await client.get_company_name("AAPL")
         assert name is not None
         assert "Apple" in name
+
+        facts = await client.get_company_facts(cik)
+        assert facts.get("entityName") is not None
+        assert "Apple" in facts["entityName"]
+        assert "us-gaap" in facts.get("facts", {})

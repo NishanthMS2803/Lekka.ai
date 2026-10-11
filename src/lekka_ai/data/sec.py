@@ -155,6 +155,18 @@ class SecClient:
         result: dict[str, Any] = response.json()
         return result
 
+    async def get_company_facts(self, cik: str | int) -> dict[str, Any]:
+        """Fetch XBRL company facts for a given CIK from SEC EDGAR.
+
+        Endpoint: https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json
+        """
+        padded_cik = str(cik).strip().zfill(10)
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{padded_cik}.json"
+        response = await self.get(url)
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
     @staticmethod
     def build_document_url(
         cik: str | int,

@@ -21,16 +21,27 @@ from lekka_ai.data.sec import (
     SecClient,
     SecClientError,
 )
+from lekka_ai.data.xbrl import (
+    DEFAULT_TAG_FALLBACKS,
+    CompanyFactsParser,
+    CompanyFactsResult,
+    PeriodFinancials,
+    parse_company_facts,
+)
 
 __all__ = [
     "AsyncHttpClient",
     "CIKNotFoundError",
     "Cache",
+    "CompanyFactsParser",
+    "CompanyFactsResult",
     "CsvFixtureProvider",
+    "DEFAULT_TAG_FALLBACKS",
     "HostRateLimiter",
     "MarketDataError",
     "MarketDataProvider",
     "PaidMarketDataProvider",
+    "PeriodFinancials",
     "RetryableHTTPStatusError",
     "SecClient",
     "SecClientError",
@@ -38,4 +49,5 @@ __all__ = [
     "TokenBucket",
     "YFinanceProvider",
     "create_http_client",
+    "parse_company_facts",
 ]
