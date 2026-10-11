@@ -16,9 +16,15 @@ from lekka_ai.data.market import (
     TickerNotFoundError,
     YFinanceProvider,
 )
+from lekka_ai.data.sec import (
+    CIKNotFoundError,
+    SecClient,
+    SecClientError,
+)
 
 __all__ = [
     "AsyncHttpClient",
+    "CIKNotFoundError",
     "Cache",
     "CsvFixtureProvider",
     "HostRateLimiter",
@@ -26,6 +32,8 @@ __all__ = [
     "MarketDataProvider",
     "PaidMarketDataProvider",
     "RetryableHTTPStatusError",
+    "SecClient",
+    "SecClientError",
     "TickerNotFoundError",
     "TokenBucket",
     "YFinanceProvider",
