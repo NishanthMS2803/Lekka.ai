@@ -8,12 +8,26 @@ from lekka_ai.data.http import (
     TokenBucket,
     create_http_client,
 )
+from lekka_ai.data.market import (
+    CsvFixtureProvider,
+    MarketDataError,
+    MarketDataProvider,
+    PaidMarketDataProvider,
+    TickerNotFoundError,
+    YFinanceProvider,
+)
 
 __all__ = [
     "AsyncHttpClient",
     "Cache",
+    "CsvFixtureProvider",
     "HostRateLimiter",
+    "MarketDataError",
+    "MarketDataProvider",
+    "PaidMarketDataProvider",
     "RetryableHTTPStatusError",
+    "TickerNotFoundError",
     "TokenBucket",
+    "YFinanceProvider",
     "create_http_client",
 ]
