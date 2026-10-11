@@ -3,6 +3,18 @@
 from lekka_ai.tools.base import Tool, ToolRegistry, default_registry
 from lekka_ai.tools.cache import TTL_POLICIES, Cache, build_cache_key, cached_tool
 from lekka_ai.tools.echo import EchoInput, EchoOutput, EchoTool
+from lekka_ai.tools.estimates import (
+    AnalystEstimatesPayload,
+    AnalystEstimatesTool,
+    GetAnalystEstimatesInput,
+    GetAnalystEstimatesOutput,
+    GetAnalystEstimatesTool,
+    GetIndustryDataInput,
+    GetIndustryDataOutput,
+    GetIndustryDataTool,
+    IndustryDataPayload,
+    IndustryDataTool,
+)
 from lekka_ai.tools.filings import (
     FilingItem,
     FilingsTool,
@@ -47,6 +59,8 @@ from lekka_ai.tools.search_filings import (
 )
 
 __all__ = [
+    "AnalystEstimatesPayload",
+    "AnalystEstimatesTool",
     "Cache",
     "Citation",
     "CompactBar",
@@ -60,15 +74,23 @@ __all__ = [
     "FilingsTool",
     "FinancialPeriodSummary",
     "FinancialsTool",
+    "GetAnalystEstimatesInput",
+    "GetAnalystEstimatesOutput",
+    "GetAnalystEstimatesTool",
     "GetFinancialsInput",
     "GetFinancialsOutput",
     "GetFinancialsTool",
+    "GetIndustryDataInput",
+    "GetIndustryDataOutput",
+    "GetIndustryDataTool",
     "GetMarketDataInput",
     "GetMarketDataOutput",
     "GetMarketDataTool",
     "GetNewsInput",
     "GetNewsOutput",
     "GetNewsTool",
+    "IndustryDataPayload",
+    "IndustryDataTool",
     "ListFilingsInput",
     "ListFilingsOutput",
     "ListFilingsTool",

@@ -10,6 +10,15 @@ from lekka_ai.data.chunking import (
     chunk_text,
     count_tokens,
 )
+from lekka_ai.data.estimates import (
+    AnalystEstimates,
+    EstimatesProvider,
+    EstimatesProviderError,
+    FinnhubEstimatesProvider,
+    FixtureEstimatesProvider,
+    IndustryData,
+    create_estimates_provider,
+)
 from lekka_ai.data.filings import (
     clean_html_to_text,
     get_section,
@@ -56,6 +65,7 @@ from lekka_ai.data.xbrl import (
 )
 
 __all__ = [
+    "AnalystEstimates",
     "AsyncHttpClient",
     "CIKNotFoundError",
     "Cache",
@@ -65,10 +75,15 @@ __all__ = [
     "DEFAULT_CHUNK_OVERLAP",
     "DEFAULT_CHUNK_SIZE",
     "DEFAULT_TAG_FALLBACKS",
+    "EstimatesProvider",
+    "EstimatesProviderError",
     "FilingChunkData",
+    "FinnhubEstimatesProvider",
     "FinnhubNewsProvider",
+    "FixtureEstimatesProvider",
     "FixtureNewsProvider",
     "HostRateLimiter",
+    "IndustryData",
     "MarketDataError",
     "MarketDataProvider",
     "MetricSource",
@@ -89,6 +104,7 @@ __all__ = [
     "chunk_text",
     "clean_html_to_text",
     "count_tokens",
+    "create_estimates_provider",
     "create_http_client",
     "create_news_provider",
     "get_section",
