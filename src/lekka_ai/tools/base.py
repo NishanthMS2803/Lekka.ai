@@ -44,9 +44,9 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool[Any, Any]] = {}
 
-    def register(self, tool: Tool[Any, Any]) -> None:
+    def register(self, tool: Tool[Any, Any], overwrite: bool = False) -> None:
         """Register a tool instance by its unique name."""
-        if tool.name in self._tools:
+        if tool.name in self._tools and not overwrite:
             raise ValueError(f"Tool '{tool.name}' is already registered.")
         self._tools[tool.name] = tool
 
@@ -59,3 +59,10 @@ class ToolRegistry:
     def list(self) -> list[Tool[Any, Any]]:
         """Return a list of all registered tools."""
         return list(self._tools.values())
+
+    def __contains__(self, name: str) -> bool:
+        """Check if tool name is registered."""
+        return name in self._tools
+
+
+default_registry: ToolRegistry = ToolRegistry()

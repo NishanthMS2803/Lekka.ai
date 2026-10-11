@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from lekka_ai.tools.base import Tool
+from lekka_ai.tools.base import Tool, default_registry
 
 
 class EchoInput(BaseModel):
@@ -28,3 +28,6 @@ class EchoTool(Tool[EchoInput, EchoOutput]):
     async def run(self, input_data: EchoInput) -> EchoOutput:
         """Execute echo tool and return EchoOutput."""
         return EchoOutput(echoed=input_data.message)
+
+
+default_registry.register(EchoTool(), overwrite=True)
