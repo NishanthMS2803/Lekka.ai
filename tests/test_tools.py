@@ -249,3 +249,95 @@ async def test_compute_risk_stats_registered() -> None:
     assert "ticker" in props
     assert "as_of_date" in props
     assert "benchmark" in props
+
+
+@pytest.mark.asyncio
+async def test_list_filings_fixture_and_as_of_filter() -> None:
+    """Verify list_filings parses saved fixture JSON and filters by as_of_date."""
+    import json
+    from pathlib import Path
+
+    import httpx
+
+    from lekka_ai.data.http import create_http_client
+    from lekka_ai.data.sec import SecClient
+    from lekka_ai.tools import ListFilingsInput, ListFilingsTool
+
+    fixture_path = Path(__file__).parent / "fixtures" / "AAPL_submissions.json"
+    with open(fixture_path) as f:
+        aapl_fixture_data = json.load(f)
+
+    tickers_data = {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        if "company_tickers.json" in url_str:
+            return httpx.Response(200, json=tickers_data, request=request)
+        if "CIK0000320193.json" in url_str:
+            return httpx.Response(200, json=aapl_fixture_data, request=request)
+        return httpx.Response(404, request=request)
+
+    transport = httpx.MockTransport(handler)
+    http_client = create_http_client(transport=transport)
+    sec_client = SecClient(http_client=http_client)
+    tool = ListFilingsTool(sec_client=sec_client)
+
+    # 1. Unclamped query for 10-K, 10-Q, 8-K
+    output_full = await tool.run(
+        ListFilingsInput(
+            ticker="AAPL",
+            form_types=["10-K", "10-Q", "8-K"],
+            limit=10,
+        )
+    )
+
+    assert output_full.ticker == "AAPL"
+    assert output_full.cik == "0000320193"
+    assert output_full.company_name == "Apple Inc."
+    assert len(output_full.filings) > 0
+    # Ensure form 4 was excluded
+    for filing in output_full.filings:
+        assert filing.form in ("10-K", "10-Q", "8-K")
+        assert filing.filing_date is not None
+        assert filing.accession_number is not None
+        assert filing.primary_document_url.startswith(
+            "https://www.sec.gov/Archives/edgar/data/320193/"
+        )
+
+    # 2. Clamped query with as_of_date="2024-12-31"
+    output_clamped = await tool.run(
+        ListFilingsInput(
+            ticker="AAPL",
+            form_types=["10-K", "10-Q", "8-K"],
+            as_of_date="2024-12-31",
+            limit=10,
+        )
+    )
+
+    # Primary verification: absolutely no filings after 2024-12-31
+    assert len(output_clamped.filings) > 0
+    for filing in output_clamped.filings:
+        assert filing.filing_date <= "2024-12-31"
+
+    # Only 2023 and 2024 10-K filings exist in fixture before 2024-12-31
+    dates = [f.filing_date for f in output_clamped.filings]
+    assert all(d <= "2024-12-31" for d in dates)
+    assert "2024-11-01" in dates
+    assert "2023-11-03" in dates
+
+
+@pytest.mark.asyncio
+async def test_list_filings_registered() -> None:
+    """list_filings is registered in default_registry and exports schema."""
+    from lekka_ai.tools import default_registry
+
+    tool = default_registry.get("list_filings")
+    assert tool is not None
+    assert tool.name == "list_filings"
+    spec = tool.to_spec()
+    assert spec.name == "list_filings"
+    props = spec.json_schema.get("properties", {})
+    assert "ticker" in props
+    assert "form_types" in props
+    assert "limit" in props
+    assert "as_of_date" in props

@@ -143,6 +143,33 @@ class SecClient:
             f"Ticker '{ticker}' not found in SEC company tickers database."
         )
 
+    async def get_submissions(self, cik: str) -> dict[str, Any]:
+        """Fetch company submissions metadata for a given CIK from SEC EDGAR.
+
+        Endpoint: https://data.sec.gov/submissions/CIK##########.json
+        """
+        padded_cik = str(cik).strip().zfill(10)
+        url = f"https://data.sec.gov/submissions/CIK{padded_cik}.json"
+        response = await self.get(url)
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    @staticmethod
+    def build_document_url(
+        cik: str | int,
+        accession_number: str,
+        primary_document: str,
+    ) -> str:
+        """Construct canonical SEC EDGAR URL for a primary filing document."""
+        clean_cik = str(int(str(cik).strip()))
+        clean_acc = accession_number.strip().replace("-", "")
+        clean_doc = primary_document.strip()
+        return (
+            f"https://www.sec.gov/Archives/edgar/data/"
+            f"{clean_cik}/{clean_acc}/{clean_doc}"
+        )
+
     async def get_company_name(self, ticker: str) -> str | None:
         """Retrieve company title/name for ticker if available."""
         norm = ticker.strip().upper()
