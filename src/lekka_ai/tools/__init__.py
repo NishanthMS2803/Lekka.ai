@@ -25,6 +25,13 @@ from lekka_ai.tools.market import (
     MarketDataTool,
     MarketSummary,
 )
+from lekka_ai.tools.news import (
+    GetNewsInput,
+    GetNewsOutput,
+    GetNewsTool,
+    NewsItem,
+    NewsTool,
+)
 from lekka_ai.tools.risk import (
     ComputeRiskStatsInput,
     ComputeRiskStatsOutput,
@@ -59,11 +66,16 @@ __all__ = [
     "GetMarketDataInput",
     "GetMarketDataOutput",
     "GetMarketDataTool",
+    "GetNewsInput",
+    "GetNewsOutput",
+    "GetNewsTool",
     "ListFilingsInput",
     "ListFilingsOutput",
     "ListFilingsTool",
     "MarketDataTool",
     "MarketSummary",
+    "NewsItem",
+    "NewsTool",
     "Passage",
     "RiskStatsTool",
     "SearchFilingsInput",

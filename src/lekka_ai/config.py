@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     MARKET_DATA_API_KEY: str | None = Field(
         default=None, description="Optional API key for market data providers"
     )
+    NEWS_PROVIDER: str = Field(
+        default="finnhub",
+        description="Default news provider (finnhub, tavily, newsapi)",
+    )
     NEWS_API_KEY: str | None = Field(
         default=None, description="Optional API key for financial news"
     )
