@@ -1,6 +1,12 @@
 """Data layer and ingestion clients for Lekka AI."""
 
 from lekka_ai.data.cache import Cache
+from lekka_ai.data.filings import (
+    clean_html_to_text,
+    get_section,
+    parse_filing_document,
+    split_filing_sections,
+)
 from lekka_ai.data.http import (
     AsyncHttpClient,
     HostRateLimiter,
@@ -50,6 +56,10 @@ __all__ = [
     "TickerNotFoundError",
     "TokenBucket",
     "YFinanceProvider",
+    "clean_html_to_text",
     "create_http_client",
+    "get_section",
     "parse_company_facts",
+    "parse_filing_document",
+    "split_filing_sections",
 ]

@@ -182,6 +182,31 @@ class SecClient:
             f"{clean_cik}/{clean_acc}/{clean_doc}"
         )
 
+    async def get_filing_document(
+        self,
+        cik: str | int,
+        accession_number: str,
+        primary_document: str,
+    ) -> str:
+        """Fetch primary filing document HTML content from SEC EDGAR.
+
+        Args:
+            cik: Central Index Key (symbol or numeric string/integer).
+            accession_number: SEC EDGAR accession number.
+            primary_document: Document filename (e.g. 'aapl-20230930.htm').
+
+        Returns:
+            HTML text content of the filing document.
+        """
+        url = self.build_document_url(
+            cik=cik,
+            accession_number=accession_number,
+            primary_document=primary_document,
+        )
+        response = await self.get(url)
+        response.raise_for_status()
+        return response.text
+
     async def get_company_name(self, ticker: str) -> str | None:
         """Retrieve company title/name for ticker if available."""
         norm = ticker.strip().upper()
