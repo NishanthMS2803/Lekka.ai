@@ -11,10 +11,19 @@ from lekka_ai.tools.market import (
     MarketDataTool,
     MarketSummary,
 )
+from lekka_ai.tools.risk import (
+    ComputeRiskStatsInput,
+    ComputeRiskStatsOutput,
+    ComputeRiskStatsTool,
+    RiskStatsTool,
+)
 
 __all__ = [
     "Cache",
     "CompactBar",
+    "ComputeRiskStatsInput",
+    "ComputeRiskStatsOutput",
+    "ComputeRiskStatsTool",
     "EchoInput",
     "EchoOutput",
     "EchoTool",
@@ -23,6 +32,7 @@ __all__ = [
     "GetMarketDataTool",
     "MarketDataTool",
     "MarketSummary",
+    "RiskStatsTool",
     "TTL_POLICIES",
     "Tool",
     "ToolRegistry",
