@@ -309,3 +309,167 @@ def moving_average(
 # Aliases
 sma = simple_moving_average
 ema = exponential_moving_average
+
+
+def align_series(
+    series1: pd.Series | Sequence[float],
+    series2: pd.Series | Sequence[float],
+) -> tuple[pd.Series, pd.Series]:
+    """Align two time series on common index labels and drop missing/NaN values.
+
+    Handles date alignment, differing series lengths, and missing observations.
+    """
+    s1 = _to_series(series1)
+    s2 = _to_series(series2)
+
+    has_labels1 = not s1.index.equals(pd.RangeIndex(len(s1)))
+    has_labels2 = not s2.index.equals(pd.RangeIndex(len(s2)))
+
+    if has_labels1 and has_labels2:
+        df = pd.concat(
+            [s1.rename("s1"), s2.rename("s2")], axis=1, join="inner"
+        ).dropna()
+        return df["s1"], df["s2"]
+
+    # Positional alignment for non-labeled sequence inputs
+    min_len = min(len(s1), len(s2))
+    sub1 = s1.iloc[-min_len:].reset_index(drop=True)
+    sub2 = s2.iloc[-min_len:].reset_index(drop=True)
+    df = pd.concat([sub1.rename("s1"), sub2.rename("s2")], axis=1).dropna()
+    return df["s1"], df["s2"]
+
+
+def _resolve_returns(
+    stock: pd.Series | Sequence[float],
+    benchmark: pd.Series | Sequence[float],
+    is_returns: bool | None,
+) -> tuple[pd.Series, pd.Series]:
+    """Align series and convert to returns if inputs are price series."""
+    s, b = align_series(stock, benchmark)
+    if len(s) < 2:
+        return pd.Series([], dtype=float), pd.Series([], dtype=float)
+
+    if is_returns is None:
+        # Auto-detect returns vs prices
+        # Returns typically have negative values or small magnitudes (<= 2.0)
+        is_ret = bool(
+            (s < 0).any()
+            or (b < 0).any()
+            or (s.abs().max() <= 2.0 and b.abs().max() <= 2.0)
+        )
+    else:
+        is_ret = is_returns
+
+    if not is_ret:
+        r_stock = simple_returns(s).dropna()
+        r_bench = simple_returns(b).dropna()
+        return align_series(r_stock, r_bench)
+
+    return s, b
+
+
+def beta(
+    stock: pd.Series | Sequence[float],
+    benchmark: pd.Series | Sequence[float],
+    is_returns: bool | None = None,
+) -> float:
+    """Calculate the beta of a stock relative to a benchmark (e.g., SPY).
+
+    Formula: beta = Cov(R_stock, R_benchmark) / Var(R_benchmark)
+    Automatically handles date alignment and missing data.
+    """
+    r_stock, r_bench = _resolve_returns(stock, benchmark, is_returns)
+    if len(r_stock) < 2:
+        return 0.0
+
+    var_b = float(r_bench.var(ddof=1))
+    if var_b == 0.0:
+        return 0.0
+
+    cov = float(r_stock.cov(r_bench))
+    return float(cov / var_b)
+
+
+def correlation(
+    stock: pd.Series | Sequence[float],
+    benchmark: pd.Series | Sequence[float],
+    is_returns: bool | None = None,
+) -> float:
+    """Calculate the Pearson correlation coefficient between a stock and benchmark.
+
+    Formula: rho = Cov(R_stock, R_benchmark) / (std(R_stock) * std(R_benchmark))
+    Automatically handles date alignment and missing data.
+    """
+    r_stock, r_bench = _resolve_returns(stock, benchmark, is_returns)
+    if len(r_stock) < 2:
+        return 0.0
+
+    std_s = float(r_stock.std(ddof=1))
+    std_b = float(r_bench.std(ddof=1))
+    if std_s == 0.0 or std_b == 0.0:
+        return 0.0
+
+    cov = float(r_stock.cov(r_bench))
+    corr = cov / (std_s * std_b)
+    return float(np.clip(corr, -1.0, 1.0))
+
+
+def relative_strength(
+    stock: pd.Series | Sequence[float],
+    benchmark: pd.Series | Sequence[float],
+    window: int | None = None,
+) -> float:
+    """Calculate relative strength of a stock vs a benchmark over a window.
+
+    Formula: RS = ((1 + R_stock) / (1 + R_benchmark)) - 1
+    Equivalent to the percentage return of the price ratio (P_stock / P_benchmark).
+    Automatically handles date alignment and missing data.
+    """
+    s, b = align_series(stock, benchmark)
+    if len(s) < 2:
+        return 0.0
+
+    if window is not None:
+        if window <= 0:
+            raise ValueError("Window must be greater than zero.")
+        effective_window = min(window, len(s))
+        sub_s = s.iloc[-effective_window:]
+        sub_b = b.iloc[-effective_window:]
+    else:
+        sub_s = s
+        sub_b = b
+
+    start_s, end_s = float(sub_s.iloc[0]), float(sub_s.iloc[-1])
+    start_b, end_b = float(sub_b.iloc[0]), float(sub_b.iloc[-1])
+
+    if start_s == 0.0 or start_b == 0.0:
+        raise ZeroDivisionError("Start price cannot be zero.")
+
+    r_s = (end_s - start_s) / start_s
+    r_b = (end_b - start_b) / start_b
+
+    denom = 1.0 + r_b
+    if denom == 0.0:
+        raise ZeroDivisionError("Benchmark return cannot be -100%.")
+
+    return float(((1.0 + r_s) / denom) - 1.0)
+
+
+def relative_strength_series(
+    stock: pd.Series | Sequence[float],
+    benchmark: pd.Series | Sequence[float],
+    window: int | None = None,
+) -> pd.Series:
+    """Calculate rolling relative strength series of a stock vs a benchmark.
+
+    Automatically handles date alignment and missing data.
+    """
+    s, b = align_series(stock, benchmark)
+    if s.empty:
+        return pd.Series([], dtype=float)
+
+    ratio = s / b
+    if window is None or window <= 1:
+        first_val = float(ratio.iloc[0])
+        return pd.Series((ratio / first_val) - 1.0, dtype=float)
+    return pd.Series((ratio / ratio.shift(window - 1)) - 1.0, dtype=float)

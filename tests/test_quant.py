@@ -8,7 +8,10 @@ import pytest
 
 from lekka_ai.quant import (
     MaxDrawdownResult,
+    align_series,
     annualized_volatility,
+    beta,
+    correlation,
     ema,
     exponential_moving_average,
     log_returns,
@@ -16,6 +19,8 @@ from lekka_ai.quant import (
     moving_average,
     period_return,
     period_returns,
+    relative_strength,
+    relative_strength_series,
     simple_moving_average,
     simple_returns,
     sma,
@@ -201,3 +206,109 @@ def test_moving_averages_hand_computed() -> None:
     # Check alias
     assert ema(prices, window=3).equals(ema_vals)
     assert moving_average(prices, window=3, kind="ema").equals(ema_vals)
+
+
+def test_beta_and_correlation_synthetic_returns_exact() -> None:
+    """Stock = 2x benchmark returns gives exact beta 2.0 and correlation 1.0."""
+    bench_returns = pd.Series([0.01, -0.02, 0.03, -0.01, 0.02])
+    stock_returns = 2.0 * bench_returns
+
+    b = beta(stock_returns, bench_returns)
+    c = correlation(stock_returns, bench_returns)
+
+    assert b == pytest.approx(2.0, rel=1e-5)
+    assert c == pytest.approx(1.0, rel=1e-5)
+
+
+def test_beta_and_correlation_inverse_synthetic() -> None:
+    """Stock = -1.5x benchmark returns gives beta -1.5 and correlation -1.0."""
+    bench_returns = pd.Series([0.01, -0.02, 0.03, -0.01, 0.02])
+    stock_returns = -1.5 * bench_returns
+
+    b = beta(stock_returns, bench_returns)
+    c = correlation(stock_returns, bench_returns)
+
+    assert b == pytest.approx(-1.5, rel=1e-5)
+    assert c == pytest.approx(-1.0, rel=1e-5)
+
+
+def test_beta_and_correlation_from_prices() -> None:
+    """Beta and correlation computed directly from price series."""
+    # Benchmark returns: +2%, -2%, +3%
+    bench_prices = pd.Series([100.0, 102.0, 99.96, 102.9588])
+    # Stock returns: +4%, -4%, +6% (exact 2x benchmark returns)
+    stock_prices = pd.Series([50.0, 52.0, 49.92, 52.9152])
+
+    b = beta(stock_prices, bench_prices)
+    c = correlation(stock_prices, bench_prices)
+
+    assert b == pytest.approx(2.0, rel=1e-5)
+    assert c == pytest.approx(1.0, rel=1e-5)
+
+
+def test_date_alignment_and_missing_data() -> None:
+    """Date alignment handles missing dates and NaN values without crash."""
+    bench_dates = pd.date_range("2024-01-01", periods=6)
+    # Benchmark prices with known daily returns
+    b = pd.Series([100.0, 102.0, 101.0, 104.0, 103.0, 105.0], index=bench_dates)
+
+    # Stock has missing date 2024-01-03, and NaN on 2024-01-02
+    stock_dates = [
+        bench_dates[0],
+        bench_dates[1],
+        bench_dates[3],
+        bench_dates[4],
+        bench_dates[5],
+    ]
+    s = pd.Series([50.0, np.nan, 52.0, 51.5, 53.0], index=stock_dates)
+
+    aligned_s, aligned_b = align_series(s, b)
+
+    # Common dates: 2024-01-01, 2024-01-04, 2024-01-05, 2024-01-06 (4 rows, NaN dropped)
+    assert len(aligned_s) == 4
+    assert len(aligned_b) == 4
+    assert not aligned_s.isna().any()
+    assert not aligned_b.isna().any()
+    assert aligned_s.index.equals(aligned_b.index)
+
+    # Beta and correlation execute cleanly on aligned data
+    b_val = beta(s, b)
+    c_val = correlation(s, b)
+    assert isinstance(b_val, float)
+    assert isinstance(c_val, float)
+    assert -1.0 <= c_val <= 1.0
+
+
+def test_relative_strength_window() -> None:
+    """Verify relative strength over window vs benchmark."""
+    # Stock gains 20% over 3-bar window
+    stock = pd.Series([100.0, 110.0, 120.0])
+    # Benchmark gains 10% over 3-bar window
+    bench = pd.Series([100.0, 105.0, 110.0])
+
+    rs = relative_strength(stock, bench, window=3)
+    expected_rs = (1.20 / 1.10) - 1.0  # ~0.090909 (9.09% outperformance)
+
+    assert rs == pytest.approx(expected_rs, abs=1e-6)
+
+    # Verify rolling series endpoint matches scalar
+    rs_series = relative_strength_series(stock, bench, window=3)
+    assert rs_series.iloc[-1] == pytest.approx(rs, abs=1e-6)
+
+
+def test_relative_strength_flat_benchmark() -> None:
+    """When benchmark is flat (0%), relative strength equals stock return."""
+    stock = pd.Series([100.0, 105.0, 115.0])  # +15%
+    bench = pd.Series([200.0, 200.0, 200.0])  # 0%
+
+    rs = relative_strength(stock, bench, window=3)
+    assert rs == pytest.approx(0.15, abs=1e-6)
+
+
+def test_zero_variance_benchmark() -> None:
+    """Constant benchmark returns variance=0, handled without error."""
+    stock = pd.Series([100.0, 102.0, 104.0])
+    bench = pd.Series([200.0, 200.0, 200.0])
+
+    assert beta(stock, bench) == 0.0
+    assert correlation(stock, bench) == 0.0

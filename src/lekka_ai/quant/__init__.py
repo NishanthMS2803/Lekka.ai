@@ -2,7 +2,10 @@
 
 from lekka_ai.quant.stats import (
     MaxDrawdownResult,
+    align_series,
     annualized_volatility,
+    beta,
+    correlation,
     ema,
     exponential_moving_average,
     log_returns,
@@ -10,6 +13,8 @@ from lekka_ai.quant.stats import (
     moving_average,
     period_return,
     period_returns,
+    relative_strength,
+    relative_strength_series,
     simple_moving_average,
     simple_returns,
     sma,
@@ -17,7 +22,10 @@ from lekka_ai.quant.stats import (
 
 __all__ = [
     "MaxDrawdownResult",
+    "align_series",
     "annualized_volatility",
+    "beta",
+    "correlation",
     "ema",
     "exponential_moving_average",
     "log_returns",
@@ -25,6 +33,8 @@ __all__ = [
     "moving_average",
     "period_return",
     "period_returns",
+    "relative_strength",
+    "relative_strength_series",
     "simple_moving_average",
     "simple_returns",
     "sma",
