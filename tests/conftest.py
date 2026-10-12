@@ -1,4 +1,4 @@
-"""Shared fixtures and test registries for specialist isolation tests."""
+"""Shared fixtures and test registries for the test suite."""
 
 import json
 from pathlib import Path
@@ -70,7 +70,7 @@ class FixtureSearchFilingsTool(SearchFilingsTool):
 @pytest.fixture
 def fixtures_dir() -> Path:
     """Return path to recorded fixtures directory."""
-    return Path(__file__).parent.parent / "fixtures"
+    return Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture

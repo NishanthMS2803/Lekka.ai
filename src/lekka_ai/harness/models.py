@@ -39,6 +39,10 @@ class AgentTask(BaseModel):
         default=None,
         description="Point-in-time cutoff date (YYYY-MM-DD)",
     )
+    run_id: str | None = Field(
+        default=None,
+        description="Parent orchestrator run identifier",
+    )
 
     @field_validator("as_of_date", mode="before")
     @classmethod

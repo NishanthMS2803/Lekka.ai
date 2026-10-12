@@ -4,6 +4,11 @@ from lekka_ai.orchestrator.budget import (
     BudgetManager,
     RunBudget,
 )
+from lekka_ai.orchestrator.dispatch import (
+    TaskResult,
+    get_relevant_context_facts,
+    run_task,
+)
 from lekka_ai.orchestrator.planner import (
     EmptyPlanError,
     GenericInstructionError,
@@ -52,6 +57,7 @@ __all__ = [
     "QueryIntent",
     "RunBudget",
     "RunState",
+    "TaskResult",
     "UnknownAgentTypeError",
     "UnknownDependencyError",
     "UnknownTickerError",
@@ -60,9 +66,11 @@ __all__ = [
     "ValidateTickerTool",
     "create_plan",
     "detect_cycles",
+    "get_relevant_context_facts",
     "persist_task_status",
     "plan_query",
     "ready_tasks",
+    "run_task",
     "topological_sort",
     "understand_query",
     "validate_plan",
