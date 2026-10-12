@@ -313,15 +313,20 @@ async def gap_check(
 
     # 2. Build user prompt
     formatted_results = _format_task_results_for_prompt(effective_results)
-    user_prompt = (
-        f"RESEARCH QUESTION / OBJECTIVE:\n"
-        f"{effective_question}\n\n"
-        f"SPECIALIST TASK RESULTS TO AUDIT:\n"
-        f"{formatted_results}\n\n"
-        f"Perform the gap check audit according to rules. Identify any conflicting "
-        f"facts, unsupported assumptions, missing evidence, or low-confidence key "
-        f"claims, and return your structured Decision."
+    prompt_parts = [
+        f"RESEARCH QUESTION / OBJECTIVE:\n{effective_question}",
+        f"SPECIALIST TASK RESULTS TO AUDIT:\n{formatted_results}",
+    ]
+    if state and state.open_questions:
+        oq_lines = "\n".join(f"- {q}" for q in state.open_questions)
+        prompt_parts.append(f"RUN-LEVEL OPEN QUESTIONS & CONFLICTS:\n{oq_lines}")
+
+    prompt_parts.append(
+        "Perform the gap check audit according to rules. Identify any conflicting "
+        "facts, unsupported assumptions, missing evidence, or low-confidence key "
+        "claims, and return your structured Decision."
     )
+    user_prompt = "\n\n".join(prompt_parts)
 
     # 3. Call LLM for structured Decision
     response = await llm.generate(
