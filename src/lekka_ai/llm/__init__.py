@@ -9,7 +9,7 @@ from lekka_ai.llm.base import (
     Usage,
 )
 from lekka_ai.llm.fake import FakeLLM
-from lekka_ai.llm.gemini import GeminiClient
+from lekka_ai.llm.gemini import GeminiClient, embed_texts
 
 __all__ = [
     "FakeLLM",
@@ -20,4 +20,5 @@ __all__ = [
     "ToolCall",
     "ToolSpec",
     "Usage",
+    "embed_texts",
 ]

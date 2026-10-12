@@ -46,6 +46,75 @@ async def _generate_with_retry(
     )
 
 
+@retry(
+    retry=retry_if_exception(_is_transient_error),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
+async def _embed_with_retry(
+    client: genai.Client,
+    model: str,
+    contents: list[str],
+    config: types.EmbedContentConfig | None = None,
+) -> types.EmbedContentResponse:
+    """Call embed_content with tenacity exponential backoff on transient errors."""
+    return await client.aio.models.embed_content(
+        model=model,
+        contents=contents,
+        config=config,
+    )
+
+
+async def embed_texts(
+    texts: list[str],
+    *,
+    model: str | None = None,
+    client: genai.Client | None = None,
+    batch_size: int = 50,
+    output_dimensionality: int | None = None,
+) -> list[list[float]]:
+    """Generate text embeddings using Gemini with batching and retries.
+
+    Args:
+        texts: List of text strings to embed.
+        model: Gemini embedding model name (defaults to
+            settings.GEMINI_EMBEDDING_MODEL).
+        client: Optional preconfigured genai.Client instance.
+        batch_size: Maximum texts per embedding request batch (default: 50).
+        output_dimensionality: Optional target embedding dimensionality.
+
+    Returns:
+        List of embedding vectors (list of floats) in original input order.
+    """
+    if not texts:
+        return []
+
+    settings = get_settings()
+    embed_model = model or settings.GEMINI_EMBEDDING_MODEL
+    api_client = client or genai.Client(api_key=settings.GEMINI_API_KEY)
+    dim = output_dimensionality or settings.EMBEDDING_DIMENSION
+
+    config = (
+        types.EmbedContentConfig(output_dimensionality=dim) if dim is not None else None
+    )
+
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        response = await _embed_with_retry(
+            client=api_client,
+            model=embed_model,
+            contents=batch,
+            config=config,
+        )
+        if response.embeddings:
+            for emb in response.embeddings:
+                all_embeddings.append(list(emb.values or []))
+
+    return all_embeddings
+
+
 class GeminiClient(LLMClient):
     """Client for generating completions using Google Gemini models."""
 
@@ -148,4 +217,16 @@ class GeminiClient(LLMClient):
             usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
             structured_output=structured_obj,
             raw=response,
+        )
+
+    async def embed(
+        self,
+        texts: list[str],
+        batch_size: int = 50,
+    ) -> list[list[float]]:
+        """Generate text embeddings using the configured Gemini client."""
+        return await embed_texts(
+            texts=texts,
+            client=self.client,
+            batch_size=batch_size,
         )

@@ -63,6 +63,50 @@ Access the interactive OpenAPI Swagger UI at `http://localhost:8000/docs`.
 
 ---
 
+## Data Sources & Retrieval Engine
+
+Lekka AI implements structured, rate-limited adapters with point-in-time (`as_of_date`) filtering to prevent future data leakage:
+
+1. **Market Data & Prices**:
+   - `YFinanceProvider` / `get_market_data`: Historical daily OHLCV bars, close prices, volume, and returns.
+2. **SEC EDGAR Filings & XBRL**:
+   - `SecClient`: Ticker-to-CIK mapping cached from SEC, compliant User-Agent headers, and rate limiting (<10 req/s).
+   - `list_filings`: Discovers 10-K, 10-Q, and 8-K filings filtered by filing date.
+   - `get_company_facts`: Parses XBRL company facts with accounting tag fallbacks (Revenues, NetIncomeLoss, OperatingIncomeLoss, Operating Cash Flow, Capex, Cash & Cash Equivalents, Debt).
+   - `get_financials`: Standardized statement metrics plus derived quantities (YoY growth, operating margin, net margin, Free Cash Flow, net debt).
+   - Document section parser: Cleans HTML filings and extracts sections by Item headings (e.g. Item 1, 1A, 7, 7A, 8).
+   - Semantic retrieval (`search_filings`): pgvector cosine search over 800-token chunks embedded with Gemini (`text-embedding-004`), returning citation documents.
+3. **News Providers**:
+   - `FinnhubNewsProvider` & `TavilyNewsProvider` / `get_news`: Gathers recent company news articles, automatically labeling all third-party text as untrusted external content.
+4. **Analyst Estimates & Industry Data**:
+   - `FinnhubEstimatesProvider` / `get_analyst_estimates` & `get_industry_data`: Consensus price targets, ratings, peer tickers, and industry multiples, with structured graceful degradation when API keys are unconfigured.
+
+---
+
+## Filing Ingestion Command
+
+To fetch, clean, split, chunk, and embed a company's latest SEC 10-K and 10-Q filings into the local `filings` and `filing_chunks` vector database:
+
+```bash
+make ingest TICKER=AAPL
+```
+
+You can specify any US ticker symbol (e.g. `TICKER=MSFT`, `TICKER=NVDA`).
+
+---
+
+## Quantitative Valuation & Modeling Engine
+
+Lekka AI includes a comprehensive quantitative valuation suite accessible directly as registered agent tools:
+
+- **DCF Valuation (`run_dcf`)**: Explicit assumptions (starting FCF or revenue + margins, WACC discount rate, Gordon Growth terminal rate, net debt, shares), returning Enterprise Value, Equity Value, fair value per share, and explicit cash flow forecast table.
+- **Reverse DCF (`run_reverse_dcf`)**: Solves for the constant growth rate or margin implied by the current market price using `scipy.optimize.brentq`.
+- **Multiples & Historical Percentiles (`compute_multiples`)**: Computes P/E, Forward P/E, EV/EBITDA, EV/Sales, P/FCF, PEG, and historical percentile ranks against historical distributions.
+- **Scenario Table & Sensitivity Grid (`scenario_table`)**: Evaluates Bear/Base/Bull scenarios with probabilities to produce weighted fair values and upside/downside percentages, alongside 2D sensitivity grids over WACC and terminal growth rates.
+- **Risk Statistics (`compute_risk_stats`)**: Historical returns, annualized volatility, max drawdown, beta vs SPY benchmark, relative strength, and moving average trends.
+
+---
+
 ## Makefile Targets
 
 | Command | Description |
@@ -75,3 +119,5 @@ Access the interactive OpenAPI Swagger UI at `http://localhost:8000/docs`.
 | `make db-up` | Start background PostgreSQL + pgvector Docker container |
 | `make db-down` | Stop PostgreSQL Docker container |
 | `make db-logs` | Stream logs from the database container |
+| `make ingest TICKER=AAPL` | Ingest, parse, chunk, and embed latest 10-K & 10-Q filings |
+

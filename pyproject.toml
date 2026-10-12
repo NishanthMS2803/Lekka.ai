@@ -12,17 +12,24 @@ dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.115.0",
     "google-genai>=2.29.0",
+    "httpx>=0.28.0",
+    "pandas>=2.2.0",
+    "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.15.0",
+    "scipy>=1.18.1",
     "sqlalchemy>=2.1.4",
     "structlog>=26.1.0",
+    "tenacity>=9.0.0",
     "uvicorn[standard]>=0.34.0",
+    "yfinance>=0.2.50",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.28.0",
     "mypy>=1.14.0",
+    "pandas-stubs>=2.2.0",
     "pre-commit>=4.0.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
@@ -63,6 +70,10 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = "lekka_ai.*"
 strict = true
+
+[[tool.mypy.overrides]]
+module = "yfinance.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
