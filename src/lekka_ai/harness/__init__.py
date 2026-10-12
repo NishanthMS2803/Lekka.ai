@@ -6,10 +6,18 @@ from lekka_ai.harness.models import (
     BudgetExhaustedError,
     Limits,
 )
+from lekka_ai.harness.permissions import (
+    AgentProfile,
+    PermissionDenied,
+    ToolView,
+)
 
 __all__ = [
+    "AgentProfile",
     "AgentTask",
     "Budget",
     "BudgetExhaustedError",
     "Limits",
+    "PermissionDenied",
+    "ToolView",
 ]
