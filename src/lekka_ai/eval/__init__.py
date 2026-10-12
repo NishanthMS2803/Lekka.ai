@@ -56,6 +56,13 @@ from lekka_ai.eval.variant import (
     StubVariant,
     Variant,
 )
+from lekka_ai.eval.variants import (
+    EngineVariant,
+    V3StaticVariant,
+    V4DynamicVariant,
+    V5DynamicVariant,
+    VariantConfig,
+)
 
 __all__ = [
     "DEFAULT_METRICS",
@@ -64,6 +71,7 @@ __all__ = [
     "AgentVariant",
     "AgreementReport",
     "DirectVariant",
+    "EngineVariant",
     "EvalExample",
     "EvalRunner",
     "EvalSummary",
@@ -78,8 +86,12 @@ __all__ = [
     "RiskRecallExample",
     "RunResult",
     "StubVariant",
+    "V3StaticVariant",
+    "V4DynamicVariant",
+    "V5DynamicVariant",
     "Variant",
     "VariantAggregate",
+    "VariantConfig",
     "abstention_precision",
     "abstention_quality",
     "abstention_recall",
