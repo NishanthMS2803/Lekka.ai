@@ -1,0 +1,1015 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Lekka AI API",
+    "description": "Multi-agent financial research system API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Return application health status and version.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Start research run in background task",
+        "description": "Launch orchestrator engine in background task and return run_id.",
+        "operationId": "create_run_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get run status and outcome",
+        "description": "Retrieve execution status and outcome for a given run ID.",
+        "operationId": "get_run_status_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Wait for run completion before returning if active",
+              "default": false,
+              "title": "Wait"
+            },
+            "description": "Wait for run completion before returning if active"
+          },
+          {
+            "name": "timeout",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Maximum seconds to wait if wait=True",
+              "default": 10.0,
+              "title": "Timeout"
+            },
+            "description": "Maximum seconds to wait if wait=True"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/report": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get final synthesized research report",
+        "description": "Retrieve synthesized research report or abstention report for run.",
+        "operationId": "get_run_report_runs__run_id__report_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Wait for run completion before returning report",
+              "default": false,
+              "title": "Wait"
+            },
+            "description": "Wait for run completion before returning report"
+          },
+          {
+            "name": "timeout",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Maximum seconds to wait if wait=True",
+              "default": 10.0,
+              "title": "Timeout"
+            },
+            "description": "Maximum seconds to wait if wait=True"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/claims": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get all claims and evidence produced by run",
+        "description": "Retrieve all claims associated with a given research run.",
+        "operationId": "get_run_claims_runs__run_id__claims_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClaimResponse"
+                  },
+                  "title": "Response Get Run Claims Runs  Run Id  Claims Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/events": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Stream research run events as Server-Sent Events (SSE)",
+        "description": "Stream real-time and historical events for run via SSE protocol.",
+        "operationId": "get_run_events_runs__run_id__events_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/trace": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get execution spans and cumulative resource cost totals",
+        "description": "Retrieve execution trace spans and resource consumption totals.",
+        "operationId": "get_run_trace_runs__run_id__trace_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunTraceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/claims/{claim_id}": {
+      "get": {
+        "tags": [
+          "claims"
+        ],
+        "summary": "Get claim with supporting evidence",
+        "description": "Retrieve an individual claim by ID along with its verifiable evidence.",
+        "operationId": "get_claim_claims__claim_id__get",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClaimResponse": {
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "title": "Claim Id",
+            "description": "Unique identifier for the claim"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "Declarative claim statement"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Epistemic type: fact, calculation, etc."
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "description": "Confidence score"
+          },
+          "derived_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived By",
+            "description": "Tool deriving claim"
+          },
+          "produced_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Produced By",
+            "description": "Agent producing claim"
+          },
+          "contradicted_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Contradicted By"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Depends On"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceResponse"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_id",
+          "text",
+          "type",
+          "confidence"
+        ],
+        "title": "ClaimResponse",
+        "description": "Declarative financial claim statement with ground-truth evidence."
+      },
+      "CostTotalsResponse": {
+        "properties": {
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "description": "Total tokens used",
+            "default": 0
+          },
+          "tokens_in": {
+            "type": "integer",
+            "title": "Tokens In",
+            "description": "Input tokens used",
+            "default": 0
+          },
+          "tokens_out": {
+            "type": "integer",
+            "title": "Tokens Out",
+            "description": "Output tokens used",
+            "default": 0
+          },
+          "tool_calls": {
+            "type": "integer",
+            "title": "Tool Calls",
+            "description": "Number of tool calls executed",
+            "default": 0
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds",
+            "description": "Total elapsed seconds",
+            "default": 0.0
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "title": "Estimated Cost Usd",
+            "description": "Estimated total cost in USD",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "CostTotalsResponse",
+        "description": "Cumulative resource and cost metrics for a run."
+      },
+      "CreateRunRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question",
+            "description": "Natural language equity research prompt or question"
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date",
+            "description": "Cutoff date for research evidence in YYYY-MM-DD format"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget",
+            "description": "Optional budget limits (max_tokens, max_cost_usd, etc.)"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config",
+            "description": "Optional run-level configuration (e.g. fault_plan)"
+          },
+          "fault_plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fault Plan",
+            "description": "Optional chaos fault injection plan (disabled in production)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "CreateRunRequest",
+        "description": "Payload to initiate an orchestrated multi-agent research run."
+      },
+      "EvidenceResponse": {
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "Source classification type"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id",
+            "description": "Document ID or ticker"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section",
+            "description": "Section heading"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id",
+            "description": "Audited tool call ID"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At",
+            "description": "ISO timestamp"
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date",
+            "description": "Cutoff date"
+          },
+          "raw_value": {
+            "title": "Raw Value",
+            "description": "Underlying raw data or metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_type"
+        ],
+        "title": "EvidenceResponse",
+        "description": "Verifiable supporting evidence item."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": "0.1.0"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse",
+        "description": "Health check response payload."
+      },
+      "RunCreateResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Unique ID of the initiated run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "RunCreateResponse",
+        "description": "Response returned upon successfully launching a run."
+      },
+      "RunReportResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Unique ID of the run"
+          },
+          "markdown": {
+            "type": "string",
+            "title": "Markdown",
+            "description": "Full report content in Markdown"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Terminal run status",
+            "default": "completed"
+          },
+          "validation_passed": {
+            "type": "boolean",
+            "title": "Validation Passed",
+            "description": "Whether report citations and numbers passed verification",
+            "default": true
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Score",
+            "description": "Calculated deterministic confidence score (0.0 to 1.0)"
+          },
+          "is_abstention": {
+            "type": "boolean",
+            "title": "Is Abstention",
+            "description": "Whether the system abstained due to insufficient evidence",
+            "default": false
+          },
+          "sentence_to_claims": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Sentence To Claims",
+            "description": "Map from report sentence to referenced claim IDs"
+          },
+          "claims_used": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Claims Used",
+            "description": "All claim IDs grounded into the report"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report",
+            "description": "Alias for markdown field"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "markdown"
+        ],
+        "title": "RunReportResponse",
+        "description": "Synthesized research report or abstention notice for a completed run."
+      },
+      "RunStatusResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Unique ID of the run"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Run status: 'pending', 'running', 'completed', 'failed', 'abstained'"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason",
+            "description": "Categorical reason execution stopped (e.g. 'done', 'abstain')"
+          },
+          "rounds": {
+            "type": "integer",
+            "title": "Rounds",
+            "description": "Orchestration rounds executed",
+            "default": 0
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome",
+            "description": "Complete execution outcome and state metadata"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if run failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunStatusResponse",
+        "description": "Execution status and terminal outcome of a research run."
+      },
+      "RunTraceResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Unique ID of the run"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/SpanResponse"
+            },
+            "type": "array",
+            "title": "Spans",
+            "description": "All execution spans recorded"
+          },
+          "cost_totals": {
+            "$ref": "#/components/schemas/CostTotalsResponse",
+            "description": "Cumulative tokens, tool calls, and USD cost totals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "RunTraceResponse",
+        "description": "Execution trace report containing spans and resource cost totals."
+      },
+      "SpanResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Span name"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique span UUID"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "Parent span UUID"
+          },
+          "start_time": {
+            "type": "string",
+            "title": "Start Time",
+            "description": "ISO start timestamp"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time",
+            "description": "ISO end timestamp"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Latency in milliseconds"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Span status (ok, error, running)",
+            "default": "ok"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "span_type": {
+            "type": "string",
+            "title": "Span Type",
+            "description": "Classification of span",
+            "default": "generic"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name",
+            "description": "Tool name if tool span"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "start_time"
+        ],
+        "title": "SpanResponse",
+        "description": "Instrumentation span record from execution tracer."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

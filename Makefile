@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval eval-all validate-datasets frontend-dev frontend-build frontend-lint frontend-typecheck
+.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval eval-all validate-datasets frontend-dev frontend-build frontend-lint frontend-typecheck frontend-test frontend-gen-api
 
 TICKER ?= AAPL
 VARIANTS ?= direct,single
@@ -53,4 +53,10 @@ frontend-lint:
 
 frontend-typecheck:
 	cd frontend && npm run typecheck
+
+frontend-test:
+	cd frontend && npm run test
+
+frontend-gen-api:
+	cd frontend && npm run gen:api
 
