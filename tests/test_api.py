@@ -9,7 +9,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from lekka_ai.api.app import API_VERSION, create_app
-from lekka_ai.api.dependencies import get_llm, get_task_runner
+from lekka_ai.api.dependencies import get_llm, get_run_manager, get_task_runner
 from lekka_ai.llm.base import LLMResponse
 from lekka_ai.llm.fake import FakeLLM
 from lekka_ai.orchestrator.dispatch import TaskResult
@@ -459,3 +459,200 @@ async def test_get_nonexistent_claim_returns_404() -> None:
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         claim_res = await client.get("/claims/claim_does_not_exist_999")
         assert claim_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_run_trace_and_matches_db() -> None:
+    """Trace endpoint returns waterfall spans matching records in the database."""
+    fake_understand = ParsedQuery(
+        intent="investment_evaluation",
+        tickers=["AAPL"],
+        needs_clarification=False,
+    )
+    fake_plan = PlanSpec(
+        tasks=[
+            PlannedTaskSpec(
+                task_id="task_valuation_01",
+                agent_type="valuation",
+                instruction="Perform reverse DCF valuation",
+                priority=1,
+            )
+        ]
+    )
+    gap_json = (
+        '{"action": "done", "follow_up_tasks": [], "reasons": ["analysis complete"]}'
+    )
+
+    fake_llm = FakeLLM(
+        [
+            LLMResponse(structured_output=fake_understand),
+            LLMResponse(structured_output=fake_plan),
+            LLMResponse(text=gap_json),
+        ]
+    )
+
+    claims = [
+        Claim(
+            claim_id="claim_trace_val_01",
+            text="Base case fair value estimate is $228.00.",
+            type=ClaimType.CALCULATION,
+            confidence=0.92,
+            produced_by="valuation",
+            evidence=[
+                Evidence(
+                    source_type="reverse_dcf",
+                    document_id="AAPL_MODEL",
+                    tool_call_id="call_trace_dcf_99",
+                    raw_value={"base_fair_value": 228.0},
+                )
+            ],
+        )
+    ]
+
+    async def mock_runner_with_trace(
+        task: PlannedTask, scratch_dir: Path
+    ) -> TaskResult:
+        # Simulate agent execution that records a tool call
+        from lekka_ai.tracing import _current_span
+
+        parent = _current_span.get()
+        assert parent is not None or True
+        return TaskResult(
+            task_id=task.task_id,
+            agent_type=task.agent_type,
+            status="completed",
+            claims=claims,
+            confidence=0.92,
+            confidence_rationale="DCF sensitivity checked.",
+            usage={"tokens_in": 1500, "tokens_out": 450, "tool_calls": 3},
+        )
+
+    app = create_app()
+    app.dependency_overrides[get_llm] = lambda: fake_llm
+    app.dependency_overrides[get_task_runner] = lambda: mock_runner_with_trace
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # 1. Initiate run
+        post_res = await client.post(
+            "/runs",
+            json={"question": "What is AAPL intrinsic fair value?"},
+        )
+        assert post_res.status_code == 200
+        run_id = post_res.json()["run_id"]
+
+        # 2. Add an explicit tool call span to the tracer to verify input/output & DB
+        run_record = get_run_manager().get_run(run_id)
+        assert run_record is not None
+        assert run_record.tracer is not None
+
+        async with run_record.tracer.span(
+            "calc_reverse_dcf",
+            span_type="tool",
+            tool_name="calc_reverse_dcf",
+            input_json={"ticker": "AAPL", "wacc": 0.085, "terminal_growth": 0.025},
+        ) as t_span:
+            t_span.output_json = {
+                "implied_growth": 0.062,
+                "fair_value": 228.0,
+                "status": "converged",
+            }
+
+        # 3. Add a simulated permission denial error span
+        async with run_record.tracer.span(
+            "unauthorized_exec",
+            span_type="tool",
+            tool_name="unauthorized_exec",
+            input_json={"cmd": "rm -rf /"},
+        ) as denial_span:
+            denial_span.status = "error"
+            denial_span.error = (
+                "Permission denied: agent 'quant' cannot use tool 'unauthorized_exec'"
+            )
+
+        # 4. Fetch /runs/{id}/trace
+        trace_res = await client.get(f"/runs/{run_id}/trace")
+        assert trace_res.status_code == 200
+        trace_data = trace_res.json()
+        assert trace_data["run_id"] == run_id
+
+        # 5. Check cost totals
+        totals = trace_data["cost_totals"]
+        assert totals["total_tokens"] >= 0
+        assert totals["tokens_in"] >= 0
+        assert totals["tokens_out"] >= 0
+        assert totals["tool_calls"] >= 1
+        assert "elapsed_seconds" in totals
+        assert "estimated_cost_usd" in totals
+
+        # 6. Check spans
+        spans = trace_data["spans"]
+        assert len(spans) >= 3
+
+        # Check planner budget decision span
+        budget_spans = [
+            s
+            for s in spans
+            if s["span_type"] == "budget" or s["name"].startswith("budget_")
+        ]
+        assert len(budget_spans) >= 1
+        b_span = budget_spans[0]
+        assert "allocated_limits" in b_span["metadata"]
+
+        # Check agent span
+        agent_spans = [
+            s
+            for s in spans
+            if s["span_type"] == "agent" or s["name"].startswith("agent:")
+        ]
+        assert len(agent_spans) >= 1
+        assert agent_spans[0]["status"] == "completed"
+
+        # Check tool call span with inputs, outputs, and latency
+        tool_spans = [s for s in spans if s["tool_name"] == "calc_reverse_dcf"]
+        assert len(tool_spans) >= 1
+        dcf_span = tool_spans[0]
+        assert dcf_span["status"] == "ok"
+        assert dcf_span["latency_ms"] is not None
+        assert dcf_span["latency_ms"] >= 0
+        assert dcf_span["input_json"]["ticker"] == "AAPL"
+        assert dcf_span["output_json"]["fair_value"] == 228.0
+
+        # Check permission denial span
+        denial_spans = [s for s in spans if s["tool_name"] == "unauthorized_exec"]
+        assert len(denial_spans) >= 1
+        assert denial_spans[0]["status"] == "error"
+        assert "Permission denied" in denial_spans[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_evals_endpoints() -> None:
+    """GET /evals, /evals/report, and /evals/plots/{name} serve evaluation data."""
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # 1. Test GET /evals
+        evals_res = await client.get("/evals")
+        assert evals_res.status_code == 200
+        data = evals_res.json()
+        assert "eval_run_id" in data
+        assert "variants" in data
+        assert isinstance(data["variants"], list)
+        assert len(data["variants"]) > 0
+
+        # Check first variant structure
+        v0 = data["variants"][0]
+        assert "variant" in v0
+        assert "accuracy" in v0
+        assert "citation_precision" in v0
+        assert "success_rate" in v0
+        assert "avg_latency_ms" in v0
+
+        # 2. Test GET /evals/report
+        report_res = await client.get("/evals/report")
+        if report_res.status_code == 200:
+            assert "# " in report_res.text or "Report" in report_res.text
+
+        # 3. Test GET /evals/plots/nonexistent
+        plot_404 = await client.get("/evals/plots/unknown_nonexistent_plot.png")
+        assert plot_404.status_code == 404

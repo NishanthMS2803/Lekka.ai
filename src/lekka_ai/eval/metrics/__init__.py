@@ -7,25 +7,61 @@ from collections.abc import Callable
 from typing import Any
 
 from lekka_ai.eval.dataset import EvalExample
+from lekka_ai.eval.metrics.abstention import (
+    AbstentionQualityResult,
+    abstention_precision,
+    abstention_quality,
+    abstention_quality_metric,
+    abstention_recall,
+    compute_abstention_quality,
+)
+from lekka_ai.eval.metrics.calibration import (
+    CalibrationResult,
+    ReliabilityBin,
+    brier_score,
+    calibration_metric,
+    compute_calibration,
+)
+from lekka_ai.eval.metrics.cost import (
+    CostBreakdown,
+    compute_cost_breakdown,
+    extract_used_claim_ids,
+    latency_metric,
+    tokens_in_metric,
+    tokens_out_metric,
+    tokens_total_metric,
+    tool_calls_metric,
+    unnecessary_agent_calls,
+    unnecessary_agent_calls_details,
+    unnecessary_agent_calls_metric,
+    usd_estimate_metric,
+)
+from lekka_ai.eval.metrics.grounding import (
+    background_claim_rate,
+    background_claim_rate_metric,
+    citation_precision,
+    citation_precision_metric,
+    interpretation_validity,
+    interpretation_validity_metric,
+    unsupported_fact_rate,
+    unsupported_fact_rate_metric,
+)
+from lekka_ai.eval.metrics.risk import (
+    RiskRecallMatch,
+    RiskRecallResult,
+    evaluate_risk_recall_llm,
+    evaluate_risk_recall_rule_based,
+    extract_flagged_themes,
+    risk_recall,
+    risk_recall_metric,
+)
 from lekka_ai.eval.variant import RunResult
 
 # Pluggable metric function signature: (RunResult, EvalExample) -> float | int | bool
 MetricFunc = Callable[[RunResult, EvalExample], Any]
 
-
-def latency_metric(result: RunResult, example: EvalExample) -> float:
-    """Measure total execution latency in milliseconds."""
-    return round(result.latency_ms, 2)
-
-
-def cost_metric(result: RunResult, example: EvalExample) -> float:
-    """Measure estimated API cost in USD."""
-    return round(result.cost, 6)
-
-
-def tool_calls_metric(result: RunResult, example: EvalExample) -> int:
-    """Count the total number of tool calls executed."""
-    return result.tool_calls
+# Alias for backward compatibility
+cost_metric = usd_estimate_metric
 
 
 def claim_count_metric(result: RunResult, example: EvalExample) -> int:
@@ -159,24 +195,7 @@ def correct_abstention_rate(result: RunResult, example: EvalExample) -> float:
     Returns 1.0 if the system's abstention decision matches expected_abstain,
     0.0 otherwise.
     """
-    expected_abstain = getattr(example, "expected_abstain", None)
-    if expected_abstain is None:
-        if isinstance(example.expected, dict) and "abstain" in example.expected:
-            expected_abstain = bool(example.expected["abstain"])
-        elif example.type in ("unanswerable", "abstain"):
-            expected_abstain = True
-        elif "abstain" in getattr(example, "tags", []):
-            expected_abstain = True
-        else:
-            expected_abstain = False
-
-    is_abstention = result.is_abstention
-    if not is_abstention and result.answer:
-        lower_ans = result.answer.lower()
-        if "insufficient evidence" in lower_ans or "abstained" in lower_ans:
-            is_abstention = True
-
-    return 1.0 if (is_abstention == expected_abstain) else 0.0
+    return abstention_quality_metric(result, example)
 
 
 DEFAULT_METRICS: dict[str, MetricFunc] = {
@@ -186,7 +205,70 @@ DEFAULT_METRICS: dict[str, MetricFunc] = {
     "claims": claim_count_metric,
     "tool_calls": tool_calls_metric,
     "latency_ms": latency_metric,
-    "cost": cost_metric,
+    "cost": usd_estimate_metric,
+    "usd_estimate": usd_estimate_metric,
+    "tokens": tokens_total_metric,
+    "tokens_total": tokens_total_metric,
+    "tokens_in": tokens_in_metric,
+    "tokens_out": tokens_out_metric,
+    "unnecessary_agent_calls": unnecessary_agent_calls_metric,
+    "risk_recall": risk_recall_metric,
+    "calibration": calibration_metric,
+    "abstention_quality": abstention_quality_metric,
     "recovery_rate": recovery_rate,
     "correct_abstention_rate": correct_abstention_rate,
+    "citation_precision": citation_precision_metric,
+    "unsupported_fact_rate": unsupported_fact_rate_metric,
+    "background_claim_rate": background_claim_rate_metric,
+    "interpretation_validity": interpretation_validity_metric,
 }
+
+__all__ = [
+    "DEFAULT_METRICS",
+    "AbstentionQualityResult",
+    "CalibrationResult",
+    "CostBreakdown",
+    "MetricFunc",
+    "ReliabilityBin",
+    "RiskRecallMatch",
+    "RiskRecallResult",
+    "abstention_precision",
+    "abstention_quality",
+    "abstention_quality_metric",
+    "abstention_recall",
+    "background_claim_rate",
+    "background_claim_rate_metric",
+    "brier_score",
+    "calibration_metric",
+    "citation_precision",
+    "citation_precision_metric",
+    "claim_count_metric",
+    "compute_abstention_quality",
+    "compute_calibration",
+    "compute_cost_breakdown",
+    "correct_abstention_rate",
+    "cost_metric",
+    "evaluate_risk_recall_llm",
+    "evaluate_risk_recall_rule_based",
+    "extract_flagged_themes",
+    "extract_used_claim_ids",
+    "factual_accuracy_metric",
+    "interpretation_validity",
+    "interpretation_validity_metric",
+    "latency_metric",
+    "numeric_accuracy_metric",
+    "recovery_rate",
+    "risk_recall",
+    "risk_recall_metric",
+    "success_metric",
+    "tokens_in_metric",
+    "tokens_out_metric",
+    "tokens_total_metric",
+    "tool_calls_metric",
+    "unnecessary_agent_calls",
+    "unnecessary_agent_calls_details",
+    "unnecessary_agent_calls_metric",
+    "unsupported_fact_rate",
+    "unsupported_fact_rate_metric",
+    "usd_estimate_metric",
+]

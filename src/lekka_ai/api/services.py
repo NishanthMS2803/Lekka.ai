@@ -92,6 +92,10 @@ class RunManager:
         """Retrieve run record by ID."""
         return self._runs.get(run_id)
 
+    def get_active_runs_count(self) -> int:
+        """Return the count of currently active or pending runs."""
+        return sum(1 for r in self._runs.values() if r.status in ("pending", "running"))
+
     def store_claims(self, run_id: str, claims: list[Claim]) -> None:
         """Associate claims with a run and index by claim ID."""
         record = self._runs.get(run_id)

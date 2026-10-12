@@ -6,7 +6,15 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -29,14 +37,19 @@ from lekka_ai.api.models import (
     SpanResponse,
     claim_to_response,
 )
+from lekka_ai.api.ratelimit import default_rate_limiter, get_client_ip
 from lekka_ai.api.services import RunManager
+from lekka_ai.config import get_settings
 from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.repository import get_run as get_db_run
 from lekka_ai.events import EventBus
 from lekka_ai.llm.base import LLMClient
+from lekka_ai.logging import get_logger, redact_secrets
 from lekka_ai.orchestrator.dispatch import TaskResult
 from lekka_ai.orchestrator.engine import RunOutcome, TaskRunnerCallable
 from lekka_ai.tools.base import ToolRegistry
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -56,6 +69,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 async def create_run(
     request: CreateRunRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
     llm: Annotated[LLMClient, Depends(get_llm)],
     run_manager: Annotated[RunManager, Depends(get_run_manager)],
     task_runner: Annotated[TaskRunnerCallable | None, Depends(get_task_runner)] = None,
@@ -63,6 +77,35 @@ async def create_run(
     session: Annotated[Session | None, Depends(get_optional_db_session)] = None,
 ) -> RunCreateResponse:
     """Launch orchestrator engine in background task and return run_id."""
+    settings = get_settings()
+
+    # 1. Enforce client request rate limiting
+    default_rate_limiter.check(get_client_ip(http_request))
+
+    # 2. Enforce active run concurrency limits
+    active_runs = run_manager.get_active_runs_count()
+    if active_runs >= settings.MAX_CONCURRENT_RUNS:
+        limit = settings.MAX_CONCURRENT_RUNS
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Maximum concurrent runs limit reached ({limit}). "
+                "Please wait for an active run to complete before launching a new run."
+            ),
+        )
+
+    # 3. Enforce fault injection prohibition outside test/dev environments
+    if request.fault_plan is not None:
+        env_lower = settings.ENV.lower()
+        if env_lower not in ("development", "dev", "test", "testing"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Chaos fault injection is strictly prohibited outside "
+                    "development/test environments."
+                ),
+            )
+
     run_id = str(uuid.uuid4())
     run_manager.create_run(
         run_id=run_id,
@@ -303,28 +346,98 @@ async def get_run_events(
 async def get_run_trace(
     run_id: str,
     run_manager: Annotated[RunManager, Depends(get_run_manager)],
+    session: Annotated[Session | None, Depends(get_optional_db_session)] = None,
 ) -> RunTraceResponse:
     """Retrieve execution trace spans and resource consumption totals."""
     record = run_manager.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
-    spans_data = [
-        SpanResponse(
-            name=s.name,
-            id=str(s.id),
-            parent_id=str(s.parent_id) if s.parent_id else None,
-            start_time=s.start_time.isoformat(),
-            end_time=s.end_time.isoformat() if s.end_time else None,
-            latency_ms=s.latency_ms,
-            status=s.status,
-            error=s.error,
-            span_type=s.span_type,
-            tool_name=s.tool_name,
-            metadata=dict(s.metadata or {}),
-        )
-        for s in (record.tracer.spans if record.tracer else [])
-    ]
+    spans_data: list[SpanResponse] = []
+    if record.tracer and record.tracer.spans:
+        for s in record.tracer.spans:
+            input_val = redact_secrets(
+                s.input_json
+                if s.input_json is not None
+                else s.metadata.get("input_json")
+            )
+            output_val = redact_secrets(
+                s.output_json
+                if s.output_json is not None
+                else s.metadata.get("output_json")
+            )
+            spans_data.append(
+                SpanResponse(
+                    name=s.name,
+                    id=str(s.id),
+                    parent_id=str(s.parent_id) if s.parent_id else None,
+                    start_time=s.start_time.isoformat(),
+                    end_time=s.end_time.isoformat() if s.end_time else None,
+                    latency_ms=s.latency_ms,
+                    status=s.status,
+                    error=s.error,
+                    span_type=s.span_type,
+                    tool_name=s.tool_name,
+                    input_json=input_val,
+                    output_json=output_val,
+                    metadata=redact_secrets(dict(s.metadata or {})),
+                )
+            )
+
+    # Reconcile or load tool calls from DB if available
+    if session is not None:
+        try:
+            run_uuid = uuid.UUID(run_id)
+            db_run = get_db_run(session, run_uuid)
+            if db_run and db_run.tasks:
+                # If spans_data is empty (e.g. loaded from DB), populate
+                # from DB agent runs and tool calls
+                if not spans_data:
+                    for task in db_run.tasks:
+                        for ar in task.agent_runs:
+                            agent_span = SpanResponse(
+                                name=f"agent:{task.agent_type}",
+                                id=str(ar.id),
+                                parent_id=None,
+                                start_time=db_run.created_at.isoformat(),
+                                end_time=(
+                                    db_run.finished_at.isoformat()
+                                    if db_run.finished_at
+                                    else None
+                                ),
+                                latency_ms=None,
+                                status=ar.status,
+                                error=None,
+                                span_type="agent",
+                                input_json=None,
+                                output_json=None,
+                                metadata={
+                                    "tokens_in": ar.tokens_in,
+                                    "tokens_out": ar.tokens_out,
+                                },
+                            )
+                            spans_data.append(agent_span)
+                            for tc in ar.tool_calls:
+                                tc_span = SpanResponse(
+                                    name=tc.tool_name,
+                                    id=str(tc.id),
+                                    parent_id=str(ar.id),
+                                    start_time=tc.created_at.isoformat(),
+                                    end_time=None,
+                                    latency_ms=tc.latency_ms,
+                                    status="error" if tc.error else "ok",
+                                    error=tc.error,
+                                    span_type="tool",
+                                    tool_name=tc.tool_name,
+                                    input_json=redact_secrets(tc.input_json),
+                                    output_json=redact_secrets(tc.output_json),
+                                    metadata=redact_secrets(
+                                        {"cache_hit": tc.cache_hit}
+                                    ),
+                                )
+                                spans_data.append(tc_span)
+        except Exception as e:
+            logger.warning("Trace DB enrichment failed", error=str(e))
 
     budget = record.budget_manager
     total_tokens = budget.used_tokens if budget else 0
@@ -339,18 +452,18 @@ async def get_run_trace(
     ):
         ti = 0
         to = 0
-        tc = 0
+        tc_count = 0
         for res in record.outcome.state.results.values():
             if isinstance(res, TaskResult) and res.usage:
                 ti += int(res.usage.get("tokens_in", 0))
                 to += int(res.usage.get("tokens_out", 0))
-                tc += int(res.usage.get("tool_calls", 0))
+                tc_count += int(res.usage.get("tool_calls", 0))
         if ti > 0 or to > 0:
             tokens_in = ti
             tokens_out = to
             total_tokens = ti + to
-        if tc > tool_calls:
-            tool_calls = tc
+        if tc_count > tool_calls:
+            tool_calls = tc_count
 
     if record.tracer:
         span_tool_count = sum(

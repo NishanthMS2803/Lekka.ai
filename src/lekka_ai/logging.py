@@ -1,11 +1,96 @@
 """Structured logging configuration and context helpers."""
 
 import logging
+import re
 import sys
-from typing import Any, TextIO
+from collections.abc import MutableMapping
+from typing import Any, TextIO, cast
 
 import structlog
 from structlog.types import Processor
+
+SENSITIVE_EXACT_KEYS = {
+    "token",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "secret",
+    "password",
+    "authorization",
+    "auth",
+    "cookie",
+    "jwt",
+    "private_key",
+    "client_secret",
+}
+
+SENSITIVE_PATTERNS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "password",
+    "private_key",
+    "bearer",
+    "gemini_api_key",
+    "sec_user_agent",
+)
+
+SECRET_REGEXES = [
+    re.compile(r"AQ\.[a-zA-Z0-9_\-]{20,}", re.IGNORECASE),
+    re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
+    re.compile(r"sk-[a-zA-Z0-9_\-]{20,}", re.IGNORECASE),
+    re.compile(r"Bearer\s+[a-zA-Z0-9\-._~+/]+=*", re.IGNORECASE),
+]
+
+
+def is_sensitive_key(k: Any) -> bool:
+    """Check if dictionary key represents a credential or secret."""
+    key_lower = str(k).lower().strip()
+    # Token count/usage metrics should not be treated as secrets
+    if "tokens" in key_lower:
+        return False
+    if key_lower in SENSITIVE_EXACT_KEYS:
+        return True
+    if any(p in key_lower for p in SENSITIVE_PATTERNS):
+        return True
+    if key_lower.endswith("_token") or key_lower.startswith("token_"):
+        return True
+    return False
+
+
+def redact_secrets(val: Any) -> Any:
+    """Recursively mask secrets and credentials in logs and trace payloads."""
+    if isinstance(val, dict):
+        redacted_dict: dict[Any, Any] = {}
+        for k, v in val.items():
+            if is_sensitive_key(k):
+                redacted_dict[k] = "[REDACTED]"
+            else:
+                redacted_dict[k] = redact_secrets(v)
+        return redacted_dict
+    elif isinstance(val, list):
+        return [redact_secrets(item) for item in val]
+    elif isinstance(val, tuple):
+        return tuple(redact_secrets(item) for item in val)
+    elif isinstance(val, set):
+        return {redact_secrets(item) for item in val}
+    elif isinstance(val, str):
+        res = val
+        for rx in SECRET_REGEXES:
+            res = rx.sub("[REDACTED]", res)
+        return res
+    return val
+
+
+def redact_secrets_processor(
+    _logger: Any,
+    _method_name: str,
+    event_dict: MutableMapping[str, Any],
+) -> MutableMapping[str, Any]:
+    """Structlog processor to sanitize sensitive tokens and credentials."""
+    return cast(MutableMapping[str, Any], redact_secrets(dict(event_dict)))
 
 
 def configure_logging(
@@ -21,6 +106,7 @@ def configure_logging(
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
+        redact_secrets_processor,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]

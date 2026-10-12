@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.logging import get_logger
-from lekka_ai.orchestrator.state import RunState
+
+if TYPE_CHECKING:
+    from lekka_ai.orchestrator.state import RunState
 from lekka_ai.schemas.claims import Claim
 
 logger = get_logger(__name__)

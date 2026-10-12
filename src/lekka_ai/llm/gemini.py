@@ -48,7 +48,7 @@ async def _generate_with_retry(
     """Call generate_content with tenacity exponential backoff on transient errors."""
     return await client.aio.models.generate_content(
         model=model,
-        contents=contents,
+        contents=contents,  # type: ignore[arg-type]
         config=config,
     )
 
@@ -68,7 +68,7 @@ async def _embed_with_retry(
     """Call embed_content with tenacity exponential backoff on transient errors."""
     return await client.aio.models.embed_content(
         model=model,
-        contents=contents,
+        contents=contents,  # type: ignore[arg-type]
         config=config,
     )
 

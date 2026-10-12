@@ -52,8 +52,30 @@ class EvalExample(BaseModel):
     expected_abstain: bool | None = Field(
         default=None, description="Whether the run is expected to abstain"
     )
+    behavior_rationale: str | None = Field(
+        default=None, description="Detailed explanation of expected behavior rationale"
+    )
     scenario: str | None = Field(
         default=None, description="Failure suite scenario identifier"
+    )
+    category: str | None = Field(
+        default=None, description="Adversarial or benchmark category classifier"
+    )
+    company_name: str | None = Field(
+        default=None, description="Corporate legal name if applicable"
+    )
+    fall_date: str | None = Field(
+        default=None, description="Approximate historical crisis date (YYYY-MM-DD)"
+    )
+    drawdown_pct: float | None = Field(
+        default=None, description="Percentage drawdown magnitude (negative float)"
+    )
+    event_description: str | None = Field(
+        default=None, description="Summary of drawdown event or context"
+    )
+    risk_themes: list[str] = Field(
+        default_factory=list,
+        description="List of risk themes labeled as 'should have been flagged'",
     )
     tags: list[str] = Field(
         default_factory=list,

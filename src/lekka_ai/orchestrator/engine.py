@@ -144,6 +144,7 @@ class OrchestrationEngine:
         event_bus: Any | None = None,
         run_id: str | None = None,
         fault_plan: Any | None = None,
+        enable_gap_check: bool = True,
     ) -> None:
         """Initialize OrchestrationEngine with configuration and dependencies."""
         if max_rounds < 1:
@@ -166,6 +167,7 @@ class OrchestrationEngine:
         self.event_bus = event_bus
         self.run_id = run_id
         self.fault_plan = fault_plan
+        self.enable_gap_check = enable_gap_check
 
     async def run(
         self,
@@ -319,7 +321,29 @@ class OrchestrationEngine:
                     },
                 )
 
-            res = await raw_runner(task, scratch_dir)
+            if self.task_runner is not None and effective_budget is not None:
+                effective_budget.allocate(task)
+
+            if self.tracer:
+                async with self.tracer.span(
+                    f"agent:{task.agent_type}",
+                    span_type="agent",
+                    metadata={
+                        "task_id": task.task_id,
+                        "agent_type": task.agent_type,
+                        "priority": task.priority,
+                        "instruction": task.instruction,
+                    },
+                ) as agent_span:
+                    res = await raw_runner(task, scratch_dir)
+                    agent_span.status = res.status
+                    if res.error:
+                        agent_span.error = res.error
+            else:
+                res = await raw_runner(task, scratch_dir)
+
+            if self.task_runner is not None and effective_budget is not None:
+                effective_budget.reconcile(res)
 
             if self.event_bus and state.run_id:
                 tool_calls_count = res.usage.get("tool_calls", 0) if res.usage else 0
@@ -458,6 +482,20 @@ class OrchestrationEngine:
             # ---------------------------------------------------------
             # Gap Check: Audit wave findings
             # ---------------------------------------------------------
+            if not self.enable_gap_check:
+                logger.info(
+                    "Gap check audit skipped per configuration",
+                    round=round_number,
+                )
+                return RunOutcome(
+                    status="completed",
+                    stop_reason="done",
+                    state=state,
+                    rounds=round_number,
+                    decision=last_decision,
+                    budget=effective_budget,
+                )
+
             logger.info("Executing parent gap check audit", round=round_number)
             decision: Decision
             try:
@@ -594,6 +632,7 @@ async def run_engine(
     event_bus: Any | None = None,
     run_id: str | None = None,
     fault_plan: Any | None = None,
+    enable_gap_check: bool = True,
 ) -> RunOutcome:
     """Run the complete multi-wave orchestration engine loop.
 
@@ -617,6 +656,7 @@ async def run_engine(
         event_bus=event_bus,
         run_id=run_id,
         fault_plan=fault_plan,
+        enable_gap_check=enable_gap_check,
     )
     return await engine.run(
         question=question,

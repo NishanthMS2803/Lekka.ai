@@ -76,8 +76,58 @@ class Settings(BaseSettings):
         description="Default run-level USD cost budget limit",
     )
 
+    # Hardening & Security Settings
+    RATE_LIMIT_RUNS_PER_MINUTE: int = Field(
+        default=30,
+        description="Max POST /runs requests allowed per minute per IP",
+    )
+    RATE_LIMIT_ENABLED: bool = Field(
+        default=True,
+        description="Whether request rate limiting is enabled",
+    )
+    MAX_QUESTION_LENGTH: int = Field(
+        default=2000,
+        description="Maximum characters allowed in run question",
+    )
+    TICKER_ALLOWLIST: list[str] | None = Field(
+        default=None,
+        description="Optional list of approved stock tickers",
+    )
+    TICKER_ALLOWLIST_ENABLED: bool = Field(
+        default=False,
+        description="Strictly enforce ticker allowlist validation",
+    )
+    MAX_CONCURRENT_RUNS: int = Field(
+        default=5,
+        description="Maximum concurrent active research runs allowed",
+    )
+    HARD_PER_RUN_COST_CAP_USD: float = Field(
+        default=2.0,
+        description="Hard cost cap in USD per research run",
+    )
+    FAULT_INJECTION_ENABLED: bool = Field(
+        default=False,
+        description="Enable fault injection (only permitted in dev/test)",
+    )
+
     def __init__(self, **values: Any) -> None:
         super().__init__(**values)
+
+
+def verify_startup_configuration(settings: Settings | None = None) -> None:
+    """Verify application security constraints upon startup.
+
+    Raises:
+        RuntimeError: If chaos fault injection is enabled outside test/dev.
+    """
+    s = settings or get_settings()
+    env_lower = s.ENV.lower()
+    is_safe_env = env_lower in ("development", "dev", "test", "testing")
+    if not is_safe_env and s.FAULT_INJECTION_ENABLED:
+        raise RuntimeError(
+            f"Security Error: Fault injection is enabled in non-dev environment "
+            f"'{s.ENV}'. Chaos testing is strictly prohibited in production."
+        )
 
 
 @lru_cache

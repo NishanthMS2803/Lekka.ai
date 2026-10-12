@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from lekka_ai.config import get_settings
 from lekka_ai.db.models import ClaimModel
 from lekka_ai.schemas.claims import Claim
 
@@ -17,6 +18,10 @@ class CreateRunRequest(BaseModel):
     question: str = Field(
         ...,
         description="Natural language equity research prompt or question",
+    )
+    ticker: str | None = Field(
+        default=None,
+        description="Optional target equity ticker symbol (e.g. 'AAPL')",
     )
     as_of_date: str | date | None = Field(
         default=None,
@@ -34,6 +39,47 @@ class CreateRunRequest(BaseModel):
         default=None,
         description="Optional chaos fault injection plan (disabled in production)",
     )
+
+    @field_validator("question")
+    @classmethod
+    def validate_question_length(cls, v: str) -> str:
+        """Validate question character length against configured maximum limit."""
+        settings = get_settings()
+        max_len = settings.MAX_QUESTION_LENGTH
+        if len(v.strip()) > max_len:
+            raise ValueError(
+                f"Question exceeds maximum allowed length of {max_len} characters."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_security_and_budget(self) -> Self:
+        """Validate ticker against allowlist and enforce hard per-run cost cap."""
+        settings = get_settings()
+
+        # 1. Ticker allowlist validation
+        target_ticker = self.ticker or (self.config or {}).get("ticker")
+        if target_ticker:
+            allowlist = settings.TICKER_ALLOWLIST
+            is_enforced = settings.TICKER_ALLOWLIST_ENABLED or allowlist is not None
+            if is_enforced and allowlist:
+                allowed_set = {t.strip().upper() for t in allowlist}
+                if str(target_ticker).strip().upper() not in allowed_set:
+                    raise ValueError(
+                        f"Ticker '{target_ticker}' is not in the allowed universe."
+                    )
+
+        # 2. Hard per-run cost cap enforcement
+        if self.budget and isinstance(self.budget, dict):
+            cap = settings.HARD_PER_RUN_COST_CAP_USD
+            for cost_key in ("cost", "max_usd", "max_cost_usd"):
+                if cost_key in self.budget and self.budget[cost_key] is not None:
+                    try:
+                        self.budget[cost_key] = min(float(self.budget[cost_key]), cap)
+                    except (ValueError, TypeError):
+                        pass
+
+        return self
 
 
 class RunCreateResponse(BaseModel):
@@ -94,10 +140,19 @@ class RunReportResponse(BaseModel):
         default=None,
         description="Alias for markdown field",
     )
+    disclaimer: str = Field(
+        default="Lekka AI is a research tool, not financial advice.",
+        description="Mandatory regulatory disclaimer",
+    )
 
     @model_validator(mode="after")
     def set_report_alias(self) -> Self:
-        """Mirror markdown into report alias if unset."""
+        """Mirror markdown into report alias and ensure disclaimer is present."""
+        if "research tool, not financial advice" not in self.markdown.lower():
+            self.markdown = (
+                f"{self.markdown.rstrip()}\n\n---\n"
+                "> **Disclaimer:** Lekka AI is a research tool, not financial advice."
+            )
         if self.report is None:
             self.report = self.markdown
         return self
@@ -181,6 +236,12 @@ class SpanResponse(BaseModel):
     error: str | None = Field(default=None, description="Error message if failed")
     span_type: str = Field(default="generic", description="Classification of span")
     tool_name: str | None = Field(default=None, description="Tool name if tool span")
+    input_json: Any | None = Field(
+        default=None, description="Input arguments to tool or span"
+    )
+    output_json: Any | None = Field(
+        default=None, description="Output payload or return value"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -207,4 +268,51 @@ class RunTraceResponse(BaseModel):
     cost_totals: CostTotalsResponse = Field(
         default_factory=CostTotalsResponse,
         description="Cumulative tokens, tool calls, and USD cost totals",
+    )
+
+
+class VariantMetricsResponse(BaseModel):
+    """Aggregate evaluation metrics for a single pipeline variant."""
+
+    variant: str = Field(..., description="Variant name, e.g. v1_direct, v5_dynamic")
+    accuracy: float = Field(default=0.0, description="Task factual accuracy rate")
+    citation_precision: float = Field(
+        default=0.0, description="Citation precision rate"
+    )
+    unsupported_facts: float = Field(default=0.0, description="Unsupported fact rate")
+    risk_recall: float = Field(default=0.0, description="Theme risk recall rate")
+    calibration: float = Field(default=0.0, description="Calibration Brier score")
+    abstention_quality: float = Field(
+        default=0.0, description="Abstention quality score"
+    )
+    success_rate: float = Field(default=0.0, description="Pipeline run success rate")
+    avg_cost: float = Field(default=0.0, description="Average cost in USD per query")
+    total_cost: float = Field(default=0.0, description="Total cost in USD")
+    avg_tokens: float = Field(default=0.0, description="Average tokens per query")
+    avg_tool_calls: float = Field(
+        default=0.0, description="Average tool calls per query"
+    )
+    unnecessary_calls: float = Field(
+        default=0.0, description="Average unnecessary calls"
+    )
+    avg_latency_ms: float = Field(default=0.0, description="Average latency in ms")
+    min_latency_ms: float = Field(default=0.0, description="Minimum latency in ms")
+    max_latency_ms: float = Field(default=0.0, description="Maximum latency in ms")
+
+
+class EvalResultsResponse(BaseModel):
+    """Evaluation benchmark results across all pipeline variants and ablations."""
+
+    eval_run_id: str = Field(..., description="Unique evaluation run identifier")
+    timestamp: str = Field(..., description="ISO execution timestamp")
+    budget_cap_usd: float = Field(
+        default=1.0, description="Allocated budget cap in USD"
+    )
+    total_spend_usd: float = Field(default=0.0, description="Total spend in USD")
+    variants: list[VariantMetricsResponse] = Field(
+        default_factory=list, description="Performance metrics by variant"
+    )
+    report_markdown: str = Field(default="", description="Complete REPORT.md contents")
+    available_plots: list[str] = Field(
+        default_factory=list, description="List of generated plot filenames"
     )

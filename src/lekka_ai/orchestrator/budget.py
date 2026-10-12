@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
 
@@ -14,7 +14,9 @@ from lekka_ai.harness.models import (
     Limits,
 )
 from lekka_ai.harness.profiles import load_agent_profile
-from lekka_ai.harness.runtime import AgentRunResult
+
+if TYPE_CHECKING:
+    from lekka_ai.harness.runtime import AgentRunResult
 from lekka_ai.logging import get_logger
 from lekka_ai.orchestrator.state import PlannedTask
 from lekka_ai.tracing import Span, Tracer
@@ -70,7 +72,17 @@ class RunBudget(Budget):
             "tracer": tracer,
         }
         init_kwargs.update(overrides)
+        # Enforce hard per-run cost cap from application settings
+        requested_cost = float(init_kwargs.get("cost", s.DEFAULT_RUN_BUDGET_USD))
+        init_kwargs["cost"] = min(requested_cost, s.HARD_PER_RUN_COST_CAP_USD)
         return cls(**init_kwargs)
+
+    def is_exhausted(self, resource: str | None = None) -> bool:
+        """Check budget exhaustion including hard per-run cost cap from config."""
+        s = get_settings()
+        if self.used_cost >= s.HARD_PER_RUN_COST_CAP_USD:
+            return True
+        return super().is_exhausted(resource)
 
     def estimate_usd(self, tokens_in: int, tokens_out: int = 0) -> float:
         """Estimate dollar cost from input and output tokens."""
@@ -80,6 +92,9 @@ class RunBudget(Budget):
 
     def can_allocate(self, task: PlannedTask | AgentTask | None = None) -> bool:
         """Determine whether the budget has available capacity to launch a task."""
+        s = get_settings()
+        if self.used_cost >= s.HARD_PER_RUN_COST_CAP_USD:
+            return False
         if self.is_exhausted():
             return False
 
@@ -228,6 +243,8 @@ class RunBudget(Budget):
             Remaining Budget after charging actual consumption.
         """
         # 1. Extract metrics
+        from lekka_ai.harness.runtime import AgentRunResult
+
         tokens_in = 0
         tokens_out = 0
         tool_calls = 0
