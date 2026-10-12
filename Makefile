@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval eval-all validate-datasets frontend-dev frontend-build frontend-lint frontend-typecheck frontend-test frontend-gen-api
+.PHONY: install lint typecheck test run up down db-up db-down db-logs ingest eval eval-all validate-datasets frontend-dev frontend-build frontend-lint frontend-typecheck frontend-test frontend-gen-api
 
 TICKER ?= AAPL
 VARIANTS ?= direct,single
@@ -21,8 +21,14 @@ test:
 run:
 	uv run uvicorn lekka_ai.api.app:app --host 0.0.0.0 --port 8000 --reload
 
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
 db-up:
-	docker compose up -d
+	docker compose up -d db
 
 db-down:
 	docker compose down
