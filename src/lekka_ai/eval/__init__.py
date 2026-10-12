@@ -10,14 +10,18 @@ from lekka_ai.eval.grader import (
 from lekka_ai.eval.metrics import (
     DEFAULT_METRICS,
     MetricFunc,
+    background_claim_rate,
+    citation_precision,
     claim_count_metric,
     correct_abstention_rate,
     cost_metric,
+    interpretation_validity,
     latency_metric,
     numeric_accuracy_metric,
     recovery_rate,
     success_metric,
     tool_calls_metric,
+    unsupported_fact_rate,
 )
 from lekka_ai.eval.runner import EvalRunner, EvalSummary, VariantAggregate
 from lekka_ai.eval.schemas import (
@@ -51,10 +55,13 @@ __all__ = [
     "StubVariant",
     "Variant",
     "VariantAggregate",
+    "background_claim_rate",
+    "citation_precision",
     "claim_count_metric",
     "correct_abstention_rate",
     "cost_metric",
     "factual_accuracy_metric",
+    "interpretation_validity",
     "latency_metric",
     "load_dataset",
     "numeric_accuracy_metric",
@@ -62,4 +69,5 @@ __all__ = [
     "save_dataset",
     "success_metric",
     "tool_calls_metric",
+    "unsupported_fact_rate",
 ]

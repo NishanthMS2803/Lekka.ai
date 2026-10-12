@@ -64,6 +64,10 @@ class RunResult(BaseModel):
         default_factory=list,
         description="List of stated missing evidence items",
     )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary run metadata such as verifier verdicts",
+    )
     error: str | None = Field(default=None, description="Error message if run failed")
     raw: Any = Field(default=None, description="Underlying result payload")
 

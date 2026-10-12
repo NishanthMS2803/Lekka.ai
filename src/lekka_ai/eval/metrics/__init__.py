@@ -7,6 +7,16 @@ from collections.abc import Callable
 from typing import Any
 
 from lekka_ai.eval.dataset import EvalExample
+from lekka_ai.eval.metrics.grounding import (
+    background_claim_rate,
+    background_claim_rate_metric,
+    citation_precision,
+    citation_precision_metric,
+    interpretation_validity,
+    interpretation_validity_metric,
+    unsupported_fact_rate,
+    unsupported_fact_rate_metric,
+)
 from lekka_ai.eval.variant import RunResult
 
 # Pluggable metric function signature: (RunResult, EvalExample) -> float | int | bool
@@ -189,4 +199,30 @@ DEFAULT_METRICS: dict[str, MetricFunc] = {
     "cost": cost_metric,
     "recovery_rate": recovery_rate,
     "correct_abstention_rate": correct_abstention_rate,
+    "citation_precision": citation_precision_metric,
+    "unsupported_fact_rate": unsupported_fact_rate_metric,
+    "background_claim_rate": background_claim_rate_metric,
+    "interpretation_validity": interpretation_validity_metric,
 }
+
+__all__ = [
+    "DEFAULT_METRICS",
+    "MetricFunc",
+    "background_claim_rate",
+    "background_claim_rate_metric",
+    "citation_precision",
+    "citation_precision_metric",
+    "claim_count_metric",
+    "correct_abstention_rate",
+    "cost_metric",
+    "factual_accuracy_metric",
+    "interpretation_validity",
+    "interpretation_validity_metric",
+    "latency_metric",
+    "numeric_accuracy_metric",
+    "recovery_rate",
+    "success_metric",
+    "tool_calls_metric",
+    "unsupported_fact_rate",
+    "unsupported_fact_rate_metric",
+]
