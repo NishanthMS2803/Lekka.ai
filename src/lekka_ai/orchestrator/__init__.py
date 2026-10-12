@@ -1,5 +1,9 @@
 """Orchestration package for multi-agent financial research planning and state."""
 
+from lekka_ai.orchestrator.budget import (
+    BudgetManager,
+    RunBudget,
+)
 from lekka_ai.orchestrator.planner import (
     EmptyPlanError,
     GenericInstructionError,
@@ -34,6 +38,7 @@ from lekka_ai.orchestrator.understand import (
 )
 
 __all__ = [
+    "BudgetManager",
     "CycleDetectedError",
     "EmptyPlanError",
     "GenericInstructionError",
@@ -45,6 +50,7 @@ __all__ = [
     "PlannedTask",
     "PlannedTaskSpec",
     "QueryIntent",
+    "RunBudget",
     "RunState",
     "UnknownAgentTypeError",
     "UnknownDependencyError",

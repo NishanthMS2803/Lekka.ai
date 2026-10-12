@@ -43,6 +43,30 @@ class Settings(BaseSettings):
     ESTIMATES_API_KEY: str | None = Field(
         default=None, description="Optional API key for consensus estimates"
     )
+    INPUT_TOKEN_PRICE_PER_M: float = Field(
+        default=0.15,
+        description="USD cost per 1M input tokens",
+    )
+    OUTPUT_TOKEN_PRICE_PER_M: float = Field(
+        default=0.60,
+        description="USD cost per 1M output tokens",
+    )
+    DEFAULT_RUN_BUDGET_TOOL_CALLS: int = Field(
+        default=50,
+        description="Default run-level tool calls budget limit",
+    )
+    DEFAULT_RUN_BUDGET_TOKENS: int = Field(
+        default=300000,
+        description="Default run-level token budget limit",
+    )
+    DEFAULT_RUN_BUDGET_SECONDS: float = Field(
+        default=180.0,
+        description="Default run-level execution seconds budget limit",
+    )
+    DEFAULT_RUN_BUDGET_USD: float = Field(
+        default=1.0,
+        description="Default run-level USD cost budget limit",
+    )
 
     def __init__(self, **values: Any) -> None:
         super().__init__(**values)
