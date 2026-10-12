@@ -44,6 +44,11 @@ from lekka_ai.tools.news import (
     NewsItem,
     NewsTool,
 )
+from lekka_ai.tools.python_sandbox import (
+    RunPythonInput,
+    RunPythonOutput,
+    RunPythonTool,
+)
 from lekka_ai.tools.quant import (
     ComputeMultiplesInput,
     ComputeMultiplesOutput,
@@ -70,6 +75,10 @@ from lekka_ai.tools.search_filings import (
     SearchFilingsInput,
     SearchFilingsOutput,
     SearchFilingsTool,
+)
+from lekka_ai.tools.submit import (
+    SubmitAnswerOutput,
+    SubmitAnswerTool,
 )
 
 __all__ = [
@@ -120,6 +129,9 @@ __all__ = [
     "RunDCFInput",
     "RunDCFOutput",
     "RunDCFTool",
+    "RunPythonInput",
+    "RunPythonOutput",
+    "RunPythonTool",
     "RunReverseDCFInput",
     "RunReverseDCFOutput",
     "RunReverseDCFTool",
@@ -129,6 +141,8 @@ __all__ = [
     "SearchFilingsInput",
     "SearchFilingsOutput",
     "SearchFilingsTool",
+    "SubmitAnswerOutput",
+    "SubmitAnswerTool",
     "TTL_POLICIES",
     "Tool",
     "ToolRegistry",

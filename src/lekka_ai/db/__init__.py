@@ -1,8 +1,15 @@
 """Database layer for Lekka AI."""
 
 from lekka_ai.db.base import Base
+from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.models import (
     AgentRun,
+    Claim,
+    ClaimModel,
+    EvalResult,
+    EvalResultModel,
+    Evidence,
+    EvidenceModel,
     Filing,
     FilingChunk,
     Run,
@@ -11,17 +18,20 @@ from lekka_ai.db.models import (
     ToolCall,
 )
 from lekka_ai.db.repository import (
+    add_claims,
     create_agent_run,
     create_filing_record,
     create_run,
     create_task,
     create_tool_call,
     find_similar_chunks,
+    get_claims,
     get_filing_chunks,
     get_filing_section,
     get_filing_sections,
     get_run,
     get_tool_call,
+    mark_contradiction,
     save_filing_chunks,
     save_filing_document,
 )
@@ -34,18 +44,27 @@ from lekka_ai.db.session import (
 __all__ = [
     "AgentRun",
     "Base",
+    "Claim",
+    "ClaimModel",
+    "EvalResult",
+    "EvalResultModel",
+    "Evidence",
+    "EvidenceModel",
     "Filing",
     "FilingChunk",
+    "LedgerRepository",
     "Run",
     "Task",
     "ToolCache",
     "ToolCall",
+    "add_claims",
     "create_agent_run",
     "create_filing_record",
     "create_run",
     "create_task",
     "create_tool_call",
     "find_similar_chunks",
+    "get_claims",
     "get_engine",
     "get_filing_chunks",
     "get_filing_section",
@@ -54,6 +73,7 @@ __all__ = [
     "get_session",
     "get_session_factory",
     "get_tool_call",
+    "mark_contradiction",
     "save_filing_chunks",
     "save_filing_document",
 ]

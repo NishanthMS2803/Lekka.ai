@@ -29,6 +29,10 @@ class Tool[InT: BaseModel, OutT: BaseModel](ABC):
             validated_input = self.input_model.model_validate(raw_input)
         return await self.run(validated_input)
 
+    async def __call__(self, raw_input: dict[str, Any] | InT) -> OutT:
+        """Invoke tool execution directly via call syntax."""
+        return await self.execute(raw_input)
+
     def to_spec(self) -> ToolSpec:
         """Export tool declaration and JSON schema as a ToolSpec."""
         return ToolSpec(

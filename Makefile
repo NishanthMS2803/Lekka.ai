@@ -1,6 +1,9 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs ingest
+.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval
 
 TICKER ?= AAPL
+VARIANTS ?= direct,single
+DATASET ?= eval/datasets/facts_v0.jsonl
+OUTPUT_DIR ?= eval/results
 
 install:
 	uv sync
@@ -29,4 +32,7 @@ db-logs:
 
 ingest:
 	uv run python -m lekka_ai.data.ingest --ticker $(TICKER)
+
+eval:
+	uv run python -m lekka_ai.eval.cli --dataset $(DATASET) --variants $(VARIANTS) --output-dir $(OUTPUT_DIR)
 

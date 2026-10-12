@@ -1,5 +1,6 @@
 """Gemini LLM provider using google-genai SDK with function calling and retries."""
 
+import copy
 from typing import Any
 
 from google import genai
@@ -16,11 +17,17 @@ from lekka_ai.llm.base import (
     ToolSpec,
     Usage,
 )
+from lekka_ai.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _is_transient_error(exc: BaseException) -> bool:
     """Identify retryable 429 rate limit or 5xx transient server errors."""
     if isinstance(exc, errors.APIError):
+        msg = str(exc).lower()
+        if "quota exceeded" in msg or "resource_exhausted" in msg:
+            return False
         code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
         return code in {429, 500, 502, 503, 504}
     return False
@@ -115,6 +122,34 @@ async def embed_texts(
     return all_embeddings
 
 
+def _resolve_schema_refs(schema_dict: dict[str, Any]) -> dict[str, Any]:
+    """Recursively resolve $defs and inline $ref fields for Gemini Schema validation."""
+    schema = copy.deepcopy(schema_dict)
+    defs = schema.pop("$defs", {})
+
+    def _resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_key = str(node["$ref"]).split("/")[-1]
+                if ref_key in defs:
+                    resolved = _resolve(copy.deepcopy(defs[ref_key]))
+                    extra = {k: _resolve(v) for k, v in node.items() if k != "$ref"}
+                    if isinstance(resolved, dict):
+                        resolved.update(extra)
+                    return resolved
+            return {
+                k: _resolve(v)
+                for k, v in node.items()
+                if k not in ("additionalProperties", "$defs")
+            }
+        elif isinstance(node, list):
+            return [_resolve(item) for item in node]
+        return node
+
+    result = _resolve(schema)
+    return result if isinstance(result, dict) else schema
+
+
 class GeminiClient(LLMClient):
     """Client for generating completions using Google Gemini models."""
 
@@ -145,13 +180,17 @@ class GeminiClient(LLMClient):
             if msg.role == "system":
                 system_parts.append(msg.content)
             else:
-                role = "user" if msg.role == "user" else "model"
-                contents.append(
-                    types.Content(
-                        role=role,
-                        parts=[types.Part.from_text(text=msg.content)],
+                role = "user" if msg.role in ("user", "tool") else "model"
+                part = types.Part.from_text(text=msg.content or " ")
+                if contents and contents[-1].role == role and contents[-1].parts:
+                    contents[-1].parts.append(part)
+                else:
+                    contents.append(
+                        types.Content(
+                            role=role,
+                            parts=[part],
+                        )
                     )
-                )
 
         config_kwargs: dict[str, Any] = {}
         if system_parts:
@@ -162,7 +201,9 @@ class GeminiClient(LLMClient):
                 types.FunctionDeclaration(
                     name=tool.name,
                     description=tool.description,
-                    parameters=types.Schema.model_validate(tool.json_schema),
+                    parameters=types.Schema.model_validate(
+                        _resolve_schema_refs(tool.json_schema)
+                    ),
                 )
                 for tool in tools
             ]
@@ -176,12 +217,46 @@ class GeminiClient(LLMClient):
 
         config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
-        response = await _generate_with_retry(
-            self.client,
+        candidate_models = [
             self.model,
-            contents,
-            config,
-        )
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
+        ]
+        # Deduplicate while preserving order
+        models_to_try = list(dict.fromkeys(candidate_models))
+
+        response = None
+        last_exc: Exception | None = None
+        for m_name in models_to_try:
+            try:
+                response = await _generate_with_retry(
+                    self.client,
+                    m_name,
+                    contents,
+                    config,
+                )
+                self.model = m_name
+                break
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                if (
+                    "quota" in exc_str
+                    or "resource_exhausted" in exc_str
+                    or "429" in exc_str
+                ):
+                    logger.warning(
+                        "Gemini model quota reached, falling back to next model",
+                        exhausted_model=m_name,
+                    )
+                    last_exc = exc
+                    continue
+        if response is None:
+            if last_exc:
+                raise last_exc
+            raise RuntimeError("Gemini model generation failed to return a response")
 
         parsed_tool_calls: list[ToolCall] = []
         if getattr(response, "function_calls", None):
