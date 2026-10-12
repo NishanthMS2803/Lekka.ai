@@ -8,9 +8,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lekka_ai.harness.errors import is_retryable_tool_error
+from lekka_ai.harness.models import Limits
 from lekka_ai.logging import get_logger
 from lekka_ai.tracing import Tracer
 
@@ -42,6 +43,36 @@ class AgentProfile(BaseModel):
         default=None,
         description="File path to the system prompt template for this agent role",
     )
+    prompt_file: str | None = Field(
+        default=None,
+        description="File path to the system prompt template for this agent role",
+    )
+    answer_extension_schema: str | None = Field(
+        default=None,
+        description="Dotted import path or name of the typed answer extension schema",
+    )
+    default_limits: Limits = Field(
+        default_factory=Limits,
+        description="Default execution limits (max_iterations, max_tokens, etc.)",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            prompt = (
+                data.get("prompt_file")
+                or data.get("system_prompt_path")
+                or data.get("prompt_path")
+            )
+            if prompt:
+                if not data.get("prompt_file"):
+                    data["prompt_file"] = prompt
+                if not data.get("system_prompt_path"):
+                    data["system_prompt_path"] = prompt
+            if "limits" in data and "default_limits" not in data:
+                data["default_limits"] = data["limits"]
+        return data
 
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check whether the tool name is in the allowed tools list."""
@@ -52,17 +83,21 @@ class AgentProfile(BaseModel):
 
     def load_system_prompt(self) -> str | None:
         """Read and return system prompt content from disk if path exists."""
-        if not self.system_prompt_path:
+        target = self.prompt_file or self.system_prompt_path
+        if not target:
             return None
-        path = Path(self.system_prompt_path)
+        path = Path(target)
         if path.is_file():
             return path.read_text(encoding="utf-8")
+        cwd_cand = Path.cwd() / target
+        if cwd_cand.is_file():
+            return cwd_cand.read_text(encoding="utf-8")
         pkg_root = Path(__file__).resolve().parent.parent
-        candidate = pkg_root / self.system_prompt_path
+        candidate = pkg_root / target
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8")
         repo_root = pkg_root.parent.parent
-        candidate = repo_root / self.system_prompt_path
+        candidate = repo_root / target
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8")
         return None

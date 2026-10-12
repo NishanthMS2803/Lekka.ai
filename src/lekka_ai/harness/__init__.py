@@ -27,7 +27,12 @@ from lekka_ai.harness.permissions import (
 from lekka_ai.harness.profiles import (
     ANALYST_PROFILE,
     create_analyst_profile,
+    find_profiles_yaml,
     get_analyst_tools,
+    load_agent_profile,
+    load_profiles,
+    load_profiles_from_dict,
+    validate_profile_tools,
 )
 from lekka_ai.harness.runtime import (
     AgentRunResult,
@@ -67,9 +72,14 @@ __all__ = [
     "create_analyst_profile",
     "escape_untrusted_content",
     "extract_untrusted_blocks",
+    "find_profiles_yaml",
     "format_tool_error",
     "get_analyst_tools",
     "is_retryable_tool_error",
+    "load_agent_profile",
+    "load_profiles",
+    "load_profiles_from_dict",
+    "validate_profile_tools",
     "wrap_tool_output",
     "wrap_untrusted_content",
 ]
