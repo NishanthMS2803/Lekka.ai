@@ -11,6 +11,10 @@ from lekka_ai.harness.permissions import (
     PermissionDenied,
     ToolView,
 )
+from lekka_ai.harness.runtime import (
+    AgentRunResult,
+    AgentRuntime,
+)
 from lekka_ai.harness.untrusted import (
     UNTRUSTED_DATA_PROMPT_SNIPPET,
     UNTRUSTED_DATA_SYSTEM_PROMPT,
@@ -26,6 +30,8 @@ __all__ = [
     "UNTRUSTED_DATA_SYSTEM_PROMPT",
     "UNTRUSTED_TAG",
     "AgentProfile",
+    "AgentRunResult",
+    "AgentRuntime",
     "AgentTask",
     "Budget",
     "BudgetExhaustedError",
