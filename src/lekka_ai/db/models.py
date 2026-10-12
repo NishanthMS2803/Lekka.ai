@@ -358,3 +358,32 @@ class EvidenceModel(Base):
 
 Claim = ClaimModel
 Evidence = EvidenceModel
+
+
+class EvalResultModel(Base):
+    """Stores evaluation output of an evaluation run for a dataset example."""
+
+    __tablename__ = "eval_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    eval_run_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    example_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    variant: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claims: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+EvalResult = EvalResultModel
