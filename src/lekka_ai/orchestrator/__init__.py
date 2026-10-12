@@ -9,6 +9,13 @@ from lekka_ai.orchestrator.dispatch import (
     get_relevant_context_facts,
     run_task,
 )
+from lekka_ai.orchestrator.gapcheck import (
+    Decision,
+    FollowUpTaskSpec,
+    GapCheckAction,
+    gap_check,
+    run_gap_check,
+)
 from lekka_ai.orchestrator.planner import (
     EmptyPlanError,
     GenericInstructionError,
@@ -45,7 +52,10 @@ from lekka_ai.orchestrator.understand import (
 __all__ = [
     "BudgetManager",
     "CycleDetectedError",
+    "Decision",
     "EmptyPlanError",
+    "FollowUpTaskSpec",
+    "GapCheckAction",
     "GenericInstructionError",
     "InvalidDependencyError",
     "ParsedQuery",
@@ -66,10 +76,12 @@ __all__ = [
     "ValidateTickerTool",
     "create_plan",
     "detect_cycles",
+    "gap_check",
     "get_relevant_context_facts",
     "persist_task_status",
     "plan_query",
     "ready_tasks",
+    "run_gap_check",
     "run_task",
     "topological_sort",
     "understand_query",
