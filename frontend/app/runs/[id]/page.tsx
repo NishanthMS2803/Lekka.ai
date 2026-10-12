@@ -1,46 +1,135 @@
 "use client";
 
-import React, { useEffect, useState, Suspense } from "react";
+import React, { useEffect, useState, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   apiClient,
   RunStatusResponse,
   RunReportResponse,
+  RunTraceResponse,
   createRunEventSource,
   RunEventPayload,
 } from "@/lib/api";
+import { ResourceCounters } from "@/components/ResourceCounters";
+import {
+  StageChecklist,
+  StageDetails,
+  AgentTaskItem,
+} from "@/components/StageChecklist";
+import { AbstentionBanner } from "@/components/AbstentionBanner";
 
 function RunDetailContent() {
   const params = useParams();
   const runId = (params?.id as string) || "";
 
+  // Core run state
   const [statusData, setStatusData] = useState<RunStatusResponse | null>(null);
   const [reportData, setReportData] = useState<RunReportResponse | null>(null);
+  const [traceData, setTraceData] = useState<RunTraceResponse | null>(null);
   const [events, setEvents] = useState<RunEventPayload[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Poll status periodically or fetch initial state
+  // Live timer state
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const startTimeRef = useRef<number | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Live checklist stage state
+  const [stages, setStages] = useState<StageDetails>({
+    understanding: { status: "running" },
+    planning: { status: "pending" },
+    agents: { status: "pending", tasks: [] },
+    gapCheck: { status: "pending" },
+    verification: { status: "pending" },
+    report: { status: "pending" },
+  });
+
+  // Resource counters
+  const [counters, setCounters] = useState({
+    toolCalls: 0,
+    tokensTotal: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    estimatedCostUsd: 0,
+  });
+
+  const currentStatus = statusData?.status || "pending";
+  const isRunning = currentStatus === "pending" || currentStatus === "running";
+  const isAbstention =
+    currentStatus === "abstained" ||
+    reportData?.is_abstention === true ||
+    stages.verification.isAbstention === true;
+  const isClarification = currentStatus === "needs_clarification";
+
+  // Wall-clock timer effect
+  useEffect(() => {
+    if (isRunning) {
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
+      timerIntervalRef.current = setInterval(() => {
+        if (startTimeRef.current !== null) {
+          const sec = (Date.now() - startTimeRef.current) / 1000;
+          setElapsedSeconds(sec);
+        }
+      }, 200);
+    } else {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [isRunning]);
+
+  // Main lifecycle & SSE subscription
   useEffect(() => {
     if (!runId) return;
 
     let isMounted = true;
 
-    async function fetchInitial() {
+    // Fetch initial status, report, and trace
+    async function fetchInitialData() {
       try {
         const status = await apiClient.getRun(runId);
-        if (isMounted) {
-          setStatusData(status);
-          setIsLoading(false);
-          if (status.status === "completed") {
-            try {
-              const rep = await apiClient.getReport(runId);
-              if (isMounted) setReportData(rep);
-            } catch {
-              // Report may not be ready yet
+        if (!isMounted) return;
+        setStatusData(status);
+        setIsLoading(false);
+
+        // Sync stop reason and stages if already terminal
+        if (status.status === "completed" || status.status === "abstained") {
+          try {
+            const rep = await apiClient.getReport(runId);
+            if (isMounted) setReportData(rep);
+          } catch {
+            // Report not ready yet
+          }
+        }
+
+        try {
+          const tr = await apiClient.getTrace(runId);
+          if (isMounted && tr.cost_totals) {
+            setTraceData(tr);
+            setCounters({
+              toolCalls: tr.cost_totals.tool_calls,
+              tokensTotal: tr.cost_totals.total_tokens,
+              tokensIn: tr.cost_totals.tokens_in,
+              tokensOut: tr.cost_totals.tokens_out,
+              estimatedCostUsd: tr.cost_totals.estimated_cost_usd,
+            });
+            if (tr.cost_totals.elapsed_seconds > 0) {
+              setElapsedSeconds(tr.cost_totals.elapsed_seconds);
             }
           }
+        } catch {
+          // Trace not available yet
         }
       } catch (err: unknown) {
         if (isMounted) {
@@ -50,65 +139,307 @@ function RunDetailContent() {
       }
     }
 
-    fetchInitial();
+    fetchInitialData();
 
-    // Subscribe to real-time events via SSE
+    // Subscribe to SSE events stream
     const unsubscribe = createRunEventSource(runId, {
-      onEvent: (event) => {
+      onEvent: (evt) => {
         if (!isMounted) return;
-        setEvents((prev) => [...prev, event]);
-      },
-      onReportReady: async () => {
-        try {
-          const rep = await apiClient.getReport(runId);
-          if (isMounted) setReportData(rep);
-          const st = await apiClient.getRun(runId);
-          if (isMounted) setStatusData(st);
-        } catch {
-          // ignore
-        }
-      },
-      onComplete: async () => {
-        try {
-          const st = await apiClient.getRun(runId);
-          if (isMounted) setStatusData(st);
-        } catch {
-          // ignore
+        setEvents((prev) => [...prev, evt]);
+
+        const rawData = (evt.data || {}) as Record<string, unknown>;
+        const data = (
+          rawData.data && typeof rawData.data === "object"
+            ? rawData.data
+            : rawData
+        ) as Record<string, unknown>;
+
+        switch (evt.event) {
+          case "run_started":
+            setStages((prev) => ({
+              ...prev,
+              understanding: {
+                ...prev.understanding,
+                status: "running",
+                asOfDate: (data.as_of_date as string) || null,
+              },
+            }));
+            break;
+
+          case "plan_created": {
+            const rawTasks = (data.tasks as Array<Record<string, unknown>>) || [];
+            const newTasks: AgentTaskItem[] = rawTasks.map((t) => ({
+              taskId: (t.task_id as string) || "task",
+              agentType: (t.agent_type as string) || "analyst",
+              instruction: (t.instruction as string) || "",
+              priority: (t.priority as number) || 2,
+              status: "pending",
+              toolCalls: 0,
+              claimsCount: 0,
+            }));
+
+            setStages((prev) => ({
+              ...prev,
+              understanding: {
+                ...prev.understanding,
+                status: "completed",
+                tickers: (data.tickers as string[]) || [],
+                intent: (data.intent as string) || undefined,
+              },
+              planning: {
+                status: "completed",
+                taskCount: (data.task_count as number) || newTasks.length,
+                intent: (data.intent as string) || undefined,
+              },
+              agents: {
+                status: newTasks.length > 0 ? "running" : "completed",
+                tasks: newTasks,
+              },
+            }));
+            break;
+          }
+
+          case "task_started": {
+            const taskId = data.task_id as string;
+            const agentType = data.agent_type as string;
+
+            setStages((prev) => {
+              const existing = prev.agents.tasks;
+              const idx = existing.findIndex((t) => t.taskId === taskId);
+              let updatedTasks: AgentTaskItem[];
+
+              if (idx >= 0) {
+                updatedTasks = existing.map((t, i) =>
+                  i === idx ? { ...t, status: "running" } : t
+                );
+              } else {
+                updatedTasks = [
+                  ...existing,
+                  {
+                    taskId: taskId || "task",
+                    agentType: agentType || "analyst",
+                    instruction: (data.instruction as string) || "",
+                    status: "running",
+                    toolCalls: 0,
+                    claimsCount: 0,
+                  },
+                ];
+              }
+
+              return {
+                ...prev,
+                agents: {
+                  status: "running",
+                  tasks: updatedTasks,
+                },
+              };
+            });
+            break;
+          }
+
+          case "tool_called": {
+            const count = (data.count as number) || 1;
+            const taskId = data.task_id as string;
+
+            setCounters((prev) => ({
+              ...prev,
+              toolCalls: prev.toolCalls + count,
+            }));
+
+            if (taskId) {
+              setStages((prev) => ({
+                ...prev,
+                agents: {
+                  ...prev.agents,
+                  tasks: prev.agents.tasks.map((t) =>
+                    t.taskId === taskId
+                      ? { ...t, toolCalls: t.toolCalls + count }
+                      : t
+                  ),
+                },
+              }));
+            }
+            break;
+          }
+
+          case "task_completed": {
+            const taskId = data.task_id as string;
+            const taskStatus: "completed" | "failed" =
+              (data.status as string) === "failed" ? "failed" : "completed";
+            const claims = (data.claims_count as number) || 0;
+
+            setStages((prev) => {
+              const updatedTasks = prev.agents.tasks.map((t) =>
+                t.taskId === taskId
+                  ? { ...t, status: taskStatus, claimsCount: claims }
+                  : t
+              );
+              const allDone = updatedTasks.every(
+                (t) => t.status === "completed" || t.status === "failed"
+              );
+
+              return {
+                ...prev,
+                agents: {
+                  status: allDone ? "completed" : "running",
+                  tasks: updatedTasks,
+                },
+              };
+            });
+            break;
+          }
+
+          case "gap_check": {
+            setStages((prev) => ({
+              ...prev,
+              gapCheck: {
+                status: "completed",
+                round: data.round as number,
+                action: data.action as string,
+                reasons: (data.reasons as string[]) || [],
+              },
+            }));
+            break;
+          }
+
+          case "verification_done": {
+            const conf = data.confidence_score as number | null;
+            const abstained = (data.is_abstention as boolean) || false;
+            const missing = (data.missing_evidence as string[]) || [];
+
+            setStages((prev) => ({
+              ...prev,
+              verification: {
+                status: "completed",
+                confidenceScore: conf,
+                isAbstention: abstained,
+                missingEvidence: missing,
+              },
+            }));
+            break;
+          }
+
+          case "report_ready": {
+            const passed = (data.validation_passed as boolean) ?? true;
+            const abstained = (data.is_abstention as boolean) || false;
+            const conf = data.confidence_score as number | null;
+
+            setStages((prev) => ({
+              ...prev,
+              understanding: { ...prev.understanding, status: "completed" },
+              planning: { ...prev.planning, status: "completed" },
+              agents: {
+                ...prev.agents,
+                status: prev.agents.status === "pending" ? "completed" : prev.agents.status,
+              },
+              gapCheck: {
+                ...prev.gapCheck,
+                status: prev.gapCheck.status === "pending" ? "completed" : prev.gapCheck.status,
+              },
+              verification: {
+                ...prev.verification,
+                status: "completed",
+                confidenceScore: conf,
+                isAbstention: abstained,
+              },
+              report: {
+                status: abstained ? "abstained" : "completed",
+                validationPassed: passed,
+                isAbstention: abstained,
+                confidenceScore: conf,
+              },
+            }));
+
+            // Fetch synthesized report
+            apiClient
+              .getReport(runId)
+              .then((rep) => {
+                if (isMounted) setReportData(rep);
+              })
+              .catch(() => {});
+
+            // Update terminal status
+            apiClient
+              .getRun(runId)
+              .then((st) => {
+                if (isMounted) setStatusData(st);
+              })
+              .catch(() => {});
+
+            // Update final trace
+            apiClient
+              .getTrace(runId)
+              .then((tr) => {
+                if (isMounted && tr.cost_totals) {
+                  setTraceData(tr);
+                  setCounters({
+                    toolCalls: tr.cost_totals.tool_calls,
+                    tokensTotal: tr.cost_totals.total_tokens,
+                    tokensIn: tr.cost_totals.tokens_in,
+                    tokensOut: tr.cost_totals.tokens_out,
+                    estimatedCostUsd: tr.cost_totals.estimated_cost_usd,
+                  });
+                  if (tr.cost_totals.elapsed_seconds > 0) {
+                    setElapsedSeconds(tr.cost_totals.elapsed_seconds);
+                  }
+                }
+              })
+              .catch(() => {});
+            break;
+          }
+
+          case "run_failed": {
+            const errMsg = (data.error as string) || "Run failed";
+            setError(errMsg);
+            setStatusData((prev) =>
+              prev ? { ...prev, status: "failed", error: errMsg } : null
+            );
+            setStages((prev) => ({
+              ...prev,
+              agents: { ...prev.agents, status: "failed" },
+              report: { ...prev.report, status: "failed" },
+            }));
+            break;
+          }
         }
       },
       onError: () => {
-        // Fallback polling if SSE is not connected
+        // Fallback polling will handle updates
       },
     });
 
-    // Fallback polling every 3s if still pending or running
-    const interval = setInterval(async () => {
+    // Periodic trace sync every 2.5s while active
+    const tracePollInterval = setInterval(async () => {
+      if (!isMounted) return;
       try {
-        const current = await apiClient.getRun(runId);
-        if (isMounted) {
-          setStatusData(current);
-          if (current.status === "completed" && !reportData) {
-            const rep = await apiClient.getReport(runId);
-            setReportData(rep);
+        const tr = await apiClient.getTrace(runId);
+        if (isMounted && tr.cost_totals) {
+          setTraceData(tr);
+          setCounters({
+            toolCalls: tr.cost_totals.tool_calls,
+            tokensTotal: tr.cost_totals.total_tokens,
+            tokensIn: tr.cost_totals.tokens_in,
+            tokensOut: tr.cost_totals.tokens_out,
+            estimatedCostUsd: tr.cost_totals.estimated_cost_usd,
+          });
+          if (!isRunning && tr.cost_totals.elapsed_seconds > 0) {
+            setElapsedSeconds(tr.cost_totals.elapsed_seconds);
           }
         }
       } catch {
         // ignore polling errors
       }
-    }, 3000);
+    }, 2500);
 
     return () => {
       isMounted = false;
       unsubscribe();
-      clearInterval(interval);
+      clearInterval(tracePollInterval);
     };
-  }, [runId, reportData]);
-
-  const currentStatus = statusData?.status || "pending";
-  const isClarification = currentStatus === "needs_clarification";
+  }, [runId, isRunning]);
 
   return (
-    <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8 sm:px-6">
+    <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 sm:px-6">
       {/* Navigation Header */}
       <div className="flex items-center justify-between mb-8 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <Link
@@ -118,151 +449,148 @@ function RunDetailContent() {
           <span>←</span>
           <span>New Research Query</span>
         </Link>
-        <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
-          ID: {runId}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
+            Run ID: {runId}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${
+              currentStatus === "completed"
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                : currentStatus === "needs_clarification"
+                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                : currentStatus === "abstained"
+                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                : currentStatus === "failed"
+                ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800"
+                : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                currentStatus === "completed"
+                  ? "bg-emerald-500"
+                  : currentStatus === "abstained" || currentStatus === "needs_clarification"
+                  ? "bg-amber-500"
+                  : currentStatus === "failed"
+                  ? "bg-red-500"
+                  : "bg-indigo-500 animate-pulse"
+              }`}
+            />
+            {currentStatus}
+          </span>
+        </div>
       </div>
 
       {/* Loading Banner */}
       {isLoading && !statusData && (
         <div className="mb-6 p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 text-indigo-800 dark:text-indigo-300 text-xs flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-indigo-500 animate-ping" />
-          <span>Connecting to orchestrator and loading run status...</span>
+          <span>Connecting to orchestrator SSE feed and streaming live run events...</span>
         </div>
       )}
 
-      {/* Error Banner */}
-      {error && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-800 dark:text-red-300 text-sm">
-          <p className="font-semibold">Unable to fetch run status</p>
-          <p className="text-xs mt-1">{error}</p>
-        </div>
-      )}
+      {/* Abstention, Clarification & Error Banner */}
+      <AbstentionBanner
+        isAbstention={isAbstention}
+        confidenceScore={
+          reportData?.confidence_score ?? stages.verification.confidenceScore
+        }
+        missingEvidence={stages.verification.missingEvidence}
+        error={error || statusData?.error}
+        isClarification={isClarification}
+      />
 
-      {/* Clarification Alert */}
-      {isClarification && (
-        <div className="mb-8 p-6 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 shadow-sm">
-          <div className="flex items-start gap-4">
-            <span className="text-2xl">⚠️</span>
-            <div className="flex-1">
-              <h2 className="text-base font-bold text-amber-900 dark:text-amber-100">
-                Research Stopped: Clarification Required
-              </h2>
-              <p className="text-xs text-amber-800 dark:text-amber-300 mt-1 leading-relaxed">
-                The orchestrator query parser flagged that the question does not specify a target
-                ticker symbol or company name. Multi-agent execution was stopped before executing
-                unbounded tool calls.
-              </p>
-              <div className="mt-4 flex items-center gap-3">
-                <Link
-                  href="/"
-                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors"
-                >
-                  Return to Ask Page to Clarify
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Live Resource Counters (Tool calls, tokens, latency, cost) */}
+      <ResourceCounters
+        toolCalls={counters.toolCalls}
+        tokensTotal={counters.tokensTotal}
+        tokensIn={counters.tokensIn}
+        tokensOut={counters.tokensOut}
+        elapsedSeconds={elapsedSeconds}
+        estimatedCostUsd={counters.estimatedCostUsd}
+        isRunning={isRunning}
+      />
 
-      {/* Main Status Header Card */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm mb-8">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Orchestrator Run Status
-            </span>
-            <h1 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1">
-              Run <span className="font-mono text-base font-normal text-zinc-500">#{runId.slice(0, 8)}</span>
-            </h1>
-          </div>
+      {/* Live Orchestration Stages Checklist */}
+      <StageChecklist stages={stages} />
 
-          <div className="flex items-center gap-3">
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
-                currentStatus === "completed"
-                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                  : currentStatus === "needs_clarification"
-                  ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
-                  : currentStatus === "failed"
-                  ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800"
-                  : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  currentStatus === "completed"
-                    ? "bg-emerald-500"
-                    : currentStatus === "needs_clarification"
-                    ? "bg-amber-500"
-                    : currentStatus === "failed"
-                    ? "bg-red-500"
-                    : "bg-indigo-500 animate-pulse"
-                }`}
-              />
-              {currentStatus}
-            </span>
-          </div>
-        </div>
-
-        {statusData && (
-          <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-            <div>
-              <span className="text-zinc-400 dark:text-zinc-500 block">Rounds Executed</span>
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                {statusData.rounds ?? 0}
-              </span>
-            </div>
-            <div>
-              <span className="text-zinc-400 dark:text-zinc-500 block">Stop Reason</span>
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                {statusData.stop_reason || (currentStatus === "running" ? "Active" : "None")}
-              </span>
-            </div>
-            <div>
-              <span className="text-zinc-400 dark:text-zinc-500 block">Streamed Events</span>
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                {events.length}
-              </span>
-            </div>
-            <div>
-              <span className="text-zinc-400 dark:text-zinc-500 block">Report Status</span>
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                {reportData ? "Synthesized" : "In Progress"}
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Synthesized Report Content if Ready */}
+      {/* Synthesized Research Report Section */}
       {reportData && (
-        <div className="mb-8 p-6 sm:p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-100 dark:border-zinc-800">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-              Synthesized Research Report
-            </h2>
-            {reportData.confidence_score !== null && reportData.confidence_score !== undefined && (
-              <span className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-700 dark:text-zinc-300">
-                Confidence: {(reportData.confidence_score * 100).toFixed(0)}%
+        <div className="mb-8 p-6 sm:p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-zinc-100 dark:border-zinc-800 gap-2">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                Final Deliverable
               </span>
-            )}
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                {reportData.is_abstention
+                  ? "Audit Abstention Report"
+                  : "Synthesized Research Memorandum"}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              {reportData.confidence_score !== null &&
+                reportData.confidence_score !== undefined && (
+                  <span className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 font-semibold font-mono text-zinc-700 dark:text-zinc-300">
+                    Confidence: {(reportData.confidence_score * 100).toFixed(0)}%
+                  </span>
+                )}
+              {reportData.validation_passed && (
+                <span className="text-xs px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-semibold">
+                  ✓ Verified Grounding
+                </span>
+              )}
+            </div>
           </div>
-          <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans">
+
+          <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans text-zinc-800 dark:text-zinc-200">
             {reportData.markdown}
           </div>
+
+          {/* Sentence-level Claim Grounding Map */}
+          {reportData.sentence_to_claims &&
+            Object.keys(reportData.sentence_to_claims).length > 0 && (
+              <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
+                  Sentence Grounding Citations
+                </h4>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-[11px]">
+                  {Object.entries(reportData.sentence_to_claims).map(
+                    ([sentence, claimIds], idx) => (
+                      <div
+                        key={idx}
+                        className="p-2 rounded-lg bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-100 dark:border-zinc-800 flex items-start justify-between gap-3"
+                      >
+                        <span className="text-zinc-700 dark:text-zinc-300 line-clamp-2">
+                          &ldquo;{sentence}&rdquo;
+                        </span>
+                        <span className="text-indigo-600 dark:text-indigo-400 font-semibold shrink-0">
+                          [{claimIds.join(", ")}]
+                        </span>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
         </div>
       )}
 
-      {/* Live Event Stream Log */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
-          Execution Event Feed ({events.length})
-        </h3>
+      {/* Live Stream Event Feed */}
+      <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Live Event Feed ({events.length})
+          </h3>
+          <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
+            EventSource SSE Stream
+          </span>
+        </div>
+
         {events.length === 0 ? (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">
-            Waiting for orchestration events from backend...
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">
+            Connecting to event stream...
           </p>
         ) : (
           <div className="space-y-2 max-h-80 overflow-y-auto font-mono text-[11px]">
@@ -275,7 +603,7 @@ function RunDetailContent() {
                   <span className="text-indigo-600 dark:text-indigo-400 font-bold mr-2">
                     {evt.event}
                   </span>
-                  <span className="text-zinc-600 dark:text-zinc-400">
+                  <span className="text-zinc-600 dark:text-zinc-400 break-all">
                     {JSON.stringify(evt.data)}
                   </span>
                 </div>
@@ -287,6 +615,53 @@ function RunDetailContent() {
           </div>
         )}
       </div>
+
+      {/* Execution Spans & Tracer Instrumentation */}
+      {traceData?.spans && traceData.spans.length > 0 && (
+        <div className="mt-8 p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Execution Spans ({traceData.spans.length})
+            </h3>
+            <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
+              Tracer Latency Audit
+            </span>
+          </div>
+
+          <div className="space-y-2 max-h-64 overflow-y-auto font-mono text-[11px]">
+            {traceData.spans.map((span, idx) => (
+              <div
+                key={span.id || idx}
+                className="p-2.5 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800 flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      span.status === "error" ? "bg-red-500" : "bg-emerald-500"
+                    }`}
+                  />
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                    {span.name}
+                  </span>
+                  {span.tool_name && (
+                    <span className="text-indigo-600 dark:text-indigo-400">
+                      [{span.tool_name}]
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 shrink-0 text-zinc-500 dark:text-zinc-400">
+                  {span.latency_ms !== null && span.latency_ms !== undefined && (
+                    <span>{span.latency_ms}ms</span>
+                  )}
+                  <span className="uppercase text-[10px] font-semibold text-zinc-400">
+                    {span.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -295,10 +670,12 @@ export default function RunDetailPage() {
   return (
     <Suspense
       fallback={
-        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8 sm:px-6">
+        <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 sm:px-6">
           <div className="p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-center">
             <span className="inline-block h-4 w-4 rounded-full bg-indigo-500 animate-ping mb-3" />
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">Loading research run...</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Loading live research run view...
+            </p>
           </div>
         </main>
       }
