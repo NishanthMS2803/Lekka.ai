@@ -102,6 +102,19 @@ class AgentProfile(BaseModel):
             return candidate.read_text(encoding="utf-8")
         return None
 
+    def get_extension_model(self) -> type[BaseModel] | None:
+        """Resolve and return the registered or configured answer extension model."""
+        from lekka_ai.schemas.submit import get_answer_extension
+
+        registered = get_answer_extension(self.agent_type)
+        if registered is not None:
+            return registered
+        if self.answer_extension_schema:
+            from lekka_ai.harness.profiles import resolve_extension_model
+
+            return resolve_extension_model(self.answer_extension_schema)
+        return None
+
 
 class PermittedToolWrapper:
     """Proxy around a Tool instance routing execution through ToolView permissions."""

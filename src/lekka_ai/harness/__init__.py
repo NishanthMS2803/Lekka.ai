@@ -26,7 +26,9 @@ from lekka_ai.harness.permissions import (
 )
 from lekka_ai.harness.profiles import (
     ANALYST_PROFILE,
+    MARKET_PROFILE,
     create_analyst_profile,
+    create_market_profile,
     find_profiles_yaml,
     get_analyst_tools,
     load_agent_profile,
@@ -62,6 +64,7 @@ __all__ = [
     "DirectLLMRunner",
     "ExtractedNumericClaims",
     "Limits",
+    "MARKET_PROFILE",
     "NumericClaimItem",
     "PermissionDenied",
     "RepeatedToolCallError",
@@ -70,6 +73,7 @@ __all__ = [
     "ToolView",
     "canonicalize_tool_args",
     "create_analyst_profile",
+    "create_market_profile",
     "escape_untrusted_content",
     "extract_untrusted_blocks",
     "find_profiles_yaml",

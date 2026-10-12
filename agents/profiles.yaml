@@ -22,3 +22,17 @@ analyst:
     max_seconds: 120.0
     max_tool_calls: 15
     max_repair_attempts: 3
+
+market:
+  allowed_tools:
+    - get_market_data
+    - compute_risk_stats
+    - submit_answer
+  prompt_file: agents/prompts/market.md
+  answer_extension_schema: lekka_ai.schemas.market:MarketAnswerExtension
+  default_limits:
+    max_iterations: 8
+    max_tokens: 100000
+    max_seconds: 60.0
+    max_tool_calls: 10
+    max_repair_attempts: 3

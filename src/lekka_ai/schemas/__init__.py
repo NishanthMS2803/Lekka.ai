@@ -1,6 +1,7 @@
 """Pydantic schemas and data contracts for Lekka AI."""
 
 from lekka_ai.schemas.claims import Claim, ClaimType, Evidence
+from lekka_ai.schemas.market import MarketAnswerExtension
 from lekka_ai.schemas.submit import (
     AnswerExtension,
     AnswerStatus,
@@ -17,6 +18,7 @@ __all__ = [
     "Claim",
     "ClaimType",
     "Evidence",
+    "MarketAnswerExtension",
     "SubmitAnswer",
     "clear_answer_extensions",
     "export_submit_answer_schema",

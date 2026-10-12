@@ -15,7 +15,10 @@ from lekka_ai.config import get_settings
 from lekka_ai.harness.direct import DirectLLMRunner
 from lekka_ai.harness.models import AgentTask, Limits
 from lekka_ai.harness.permissions import ToolView
-from lekka_ai.harness.profiles import create_analyst_profile
+from lekka_ai.harness.profiles import (
+    create_analyst_profile,
+    load_agent_profile,
+)
 from lekka_ai.harness.runtime import AgentRunResult, AgentRuntime
 from lekka_ai.llm.gemini import GeminiClient
 from lekka_ai.tools.base import default_registry
@@ -32,6 +35,7 @@ async def _run_ask(
     question: str,
     as_of: str | None,
     variant: str = "agent",
+    agent_type: str = "analyst",
     max_iterations: int = 10,
     timeout: float = 120.0,
 ) -> AgentRunResult:
@@ -51,7 +55,7 @@ async def _run_ask(
     task = AgentTask(
         instruction=question,
         as_of_date=as_of,
-        agent_type="direct" if variant.lower() == "direct" else "analyst",
+        agent_type="direct" if variant.lower() == "direct" else agent_type,
     )
 
     if variant.lower() == "direct":
@@ -61,7 +65,10 @@ async def _run_ask(
             as_of_date=as_of,
         )
 
-    profile = create_analyst_profile()
+    try:
+        profile = load_agent_profile(agent_type)
+    except Exception:
+        profile = create_analyst_profile()
     tool_view = ToolView(default_registry, profile=profile)
 
     limits = Limits(
@@ -165,6 +172,12 @@ def ask(
             "or 'direct' (V1 direct LLM baseline)."
         ),
     ),
+    agent: str = typer.Option(
+        "analyst",
+        "--agent",
+        "-a",
+        help="Agent specialist profile to execute ('analyst', 'market').",
+    ),
     max_iterations: int = typer.Option(
         10,
         "--max-iterations",
@@ -187,7 +200,9 @@ def ask(
     """Investigate a financial question using the baseline analyst agent."""
     console.print()
     is_direct = variant.strip().lower() == "direct"
-    title_suffix = " (Direct LLM Baseline - V1)" if is_direct else ""
+    title_suffix = (
+        " (Direct LLM Baseline - V1)" if is_direct else f" ({agent.capitalize()} Agent)"
+    )
     header_text = Text()
     header_text.append(f"Lekka AI Financial Analyst{title_suffix}\n", style="bold blue")
     header_text.append(f"Query: {question}\n", style="white")
@@ -198,7 +213,7 @@ def ask(
     status_msg = (
         "Direct LLM generating response and extracting claims..."
         if is_direct
-        else "Analyst investigating using tools..."
+        else f"{agent.capitalize()} agent investigating using tools..."
     )
     with console.status(f"[bold green]{status_msg}", spinner="dots"):
         try:
@@ -207,6 +222,7 @@ def ask(
                     question=question,
                     as_of=as_of,
                     variant=variant,
+                    agent_type=agent,
                     max_iterations=max_iterations,
                     timeout=timeout,
                 )
@@ -252,6 +268,22 @@ def ask(
             border_style="green",
         )
     )
+
+    # Answer Extension (e.g. Market Trend & Key Stats)
+    if submission and submission.extension:
+        ext = submission.extension
+        console.print("\n[bold magenta]Answer Extension:[/bold magenta]")
+        if hasattr(ext, "trend_label"):
+            console.print(f"  • [bold]Trend Label:[/bold] {ext.trend_label}")
+        if hasattr(ext, "key_stats") and ext.key_stats:
+            console.print("  • [bold]Key Stats:[/bold]")
+            stats_dict = (
+                ext.key_stats.model_dump()
+                if hasattr(ext.key_stats, "model_dump")
+                else ext.key_stats
+            )
+            for k, v in stats_dict.items():
+                console.print(f"      - {k}: {v}")
 
     # Claims table
     if submission and submission.claims:

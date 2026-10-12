@@ -212,3 +212,33 @@ def create_analyst_profile(
 
 # Standard singleton analyst profile
 ANALYST_PROFILE: AgentProfile = create_analyst_profile()
+
+DEFAULT_MARKET_TOOLS: list[str] = [
+    "get_market_data",
+    "compute_risk_stats",
+    "submit_answer",
+]
+
+
+def create_market_profile(
+    registry: ToolRegistry | None = None,
+    system_prompt_path: str | Path | None = None,
+) -> AgentProfile:
+    """Create or load the standard 'market' AgentProfile."""
+    try:
+        return load_agent_profile("market", registry=registry)
+    except Exception:
+        market_prompt_cand = (
+            Path(system_prompt_path)
+            if system_prompt_path
+            else Path("agents/prompts/market.md")
+        )
+        return AgentProfile(
+            agent_type="market",
+            allowed_tools=list(DEFAULT_MARKET_TOOLS),
+            system_prompt_path=str(market_prompt_cand),
+            answer_extension_schema="lekka_ai.schemas.market:MarketAnswerExtension",
+        )
+
+
+MARKET_PROFILE: AgentProfile = create_market_profile()
