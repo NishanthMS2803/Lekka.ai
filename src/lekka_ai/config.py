@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     ESTIMATES_API_KEY: str | None = Field(
         default=None, description="Optional API key for consensus estimates"
     )
+    VERIFIER_MODEL: str = Field(
+        default="gemini-flash-lite-latest",
+        description="Cheap model setting for verifier tasks",
+    )
+    VERIFIER_BATCH_SIZE: int = Field(
+        default=5,
+        description="Batch size for claim verification LLM calls",
+    )
     INPUT_TOKEN_PRICE_PER_M: float = Field(
         default=0.15,
         description="USD cost per 1M input tokens",
