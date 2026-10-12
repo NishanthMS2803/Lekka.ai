@@ -8,10 +8,22 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
-from lekka_ai.db.models import AgentRun, Filing, FilingChunk, Run, Task, ToolCall
+from lekka_ai.db.ledger import LedgerRepository
+from lekka_ai.db.models import (
+    AgentRun,
+    ClaimModel,
+    Filing,
+    FilingChunk,
+    Run,
+    Task,
+    ToolCall,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lekka_ai.data.chunking import FilingChunkData
+    from lekka_ai.schemas.claims import Claim
 
 
 def create_run(
@@ -342,3 +354,50 @@ def find_similar_chunks(
     stmt = stmt.order_by(distance_col).limit(limit)
     rows = session.execute(stmt).all()
     return [(row[0], float(row[1])) for row in rows]
+
+
+def add_claims(
+    session: Session,
+    claims: Sequence[Claim | ClaimModel | dict[str, Any]],
+    *,
+    run_id: uuid.UUID | str,
+    task_id: uuid.UUID | str | None = None,
+    agent_run_id: uuid.UUID | str | None = None,
+) -> list[ClaimModel]:
+    """Persist claims and linked evidence using LedgerRepository."""
+    repo = LedgerRepository(session)
+    return repo.add_claims(
+        claims,
+        run_id=run_id,
+        task_id=task_id,
+        agent_run_id=agent_run_id,
+    )
+
+
+def get_claims(
+    session: Session,
+    run_id: uuid.UUID | str,
+    filters: dict[str, Any] | None = None,
+    *,
+    claim_type: str | None = None,
+    **kwargs: Any,
+) -> list[ClaimModel]:
+    """Query claims for a run with optional filtering."""
+    repo = LedgerRepository(session)
+    return repo.get_claims(run_id, filters, claim_type=claim_type, **kwargs)
+
+
+def mark_contradiction(
+    session: Session,
+    claim_id: str | uuid.UUID,
+    contradicted_by_id: str | uuid.UUID,
+    *,
+    run_id: uuid.UUID | str | None = None,
+) -> ClaimModel:
+    """Mark a claim as contradicted using LedgerRepository."""
+    repo = LedgerRepository(session)
+    return repo.mark_contradiction(
+        claim_id,
+        contradicted_by_id,
+        run_id=run_id,
+    )

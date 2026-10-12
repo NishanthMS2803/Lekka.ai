@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -46,6 +47,9 @@ class Run(Base):
     tasks: Mapped[list["Task"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    claims: Mapped[list["ClaimModel"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
 
 
 class Task(Base):
@@ -74,6 +78,7 @@ class Task(Base):
     parent_task: Mapped["Task | None"] = relationship(
         back_populates="subtasks", remote_side=[id]
     )
+    claims: Mapped[list["ClaimModel"]] = relationship(back_populates="task")
 
 
 class AgentRun(Base):
@@ -99,6 +104,7 @@ class AgentRun(Base):
     tool_calls: Mapped[list["ToolCall"]] = relationship(
         back_populates="agent_run", cascade="all, delete-orphan"
     )
+    claims: Mapped[list["ClaimModel"]] = relationship(back_populates="agent_run")
 
 
 class ToolCall(Base):
@@ -129,6 +135,7 @@ class ToolCall(Base):
     )
 
     agent_run: Mapped["AgentRun"] = relationship(back_populates="tool_calls")
+    evidence: Mapped[list["EvidenceModel"]] = relationship(back_populates="tool_call")
 
 
 class ToolCache(Base):
@@ -210,3 +217,144 @@ class FilingChunk(Base):
             "section_name",
         ),
     )
+
+
+class ClaimModel(Base):
+    """Persisted financial claim statement with ground-truth evidence and lineage."""
+
+    __tablename__ = "claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    claim_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    derived_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    produced_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contradicted_by: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    depends_on: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    run: Mapped["Run"] = relationship(back_populates="claims")
+    task: Mapped["Task | None"] = relationship(back_populates="claims")
+    agent_run: Mapped["AgentRun | None"] = relationship(back_populates="claims")
+    evidence: Mapped[list["EvidenceModel"]] = relationship(
+        back_populates="claim",
+        cascade="all, delete-orphan",
+        order_by="EvidenceModel.created_at",
+    )
+
+    def to_schema(self) -> Any:
+        """Convert ORM model to Pydantic Claim schema."""
+        from lekka_ai.schemas.claims import Claim
+
+        return Claim(
+            claim_id=self.claim_id,
+            text=self.text,
+            type=self.type,
+            confidence=self.confidence,
+            derived_by=self.derived_by,
+            produced_by=self.produced_by,
+            contradicted_by=list(self.contradicted_by or []),
+            depends_on=list(self.depends_on or []),
+            evidence=[e.to_schema() for e in self.evidence],
+        )
+
+
+class EvidenceModel(Base):
+    """Verifiable supporting evidence item linked to claims and tool calls."""
+
+    __tablename__ = "evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    claim_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("claims.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    tool_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tool_calls.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    document_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    section: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    retrieved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    as_of_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    raw_value: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    claim: Mapped["ClaimModel"] = relationship(back_populates="evidence")
+    tool_call: Mapped["ToolCall | None"] = relationship(back_populates="evidence")
+    run: Mapped["Run | None"] = relationship(foreign_keys=[run_id])
+    task: Mapped["Task | None"] = relationship(foreign_keys=[task_id])
+    agent_run: Mapped["AgentRun | None"] = relationship(foreign_keys=[agent_run_id])
+
+    def to_schema(self) -> Any:
+        """Convert ORM model to Pydantic Evidence schema."""
+        from lekka_ai.schemas.claims import Evidence
+
+        return Evidence(
+            source_type=self.source_type,
+            document_id=self.document_id,
+            section=self.section,
+            tool_call_id=str(self.tool_call_id) if self.tool_call_id else None,
+            retrieved_at=self.retrieved_at.isoformat() if self.retrieved_at else None,
+            as_of_date=self.as_of_date.isoformat() if self.as_of_date else None,
+            raw_value=self.raw_value,
+        )
+
+
+Claim = ClaimModel
+Evidence = EvidenceModel
