@@ -16,7 +16,7 @@ from lekka_ai.harness.untrusted import (
 )
 from lekka_ai.llm.base import Message
 from lekka_ai.logging import get_logger
-from lekka_ai.schemas.submit import SubmitAnswer
+from lekka_ai.schemas.submit import AnswerStatus, SubmitAnswer
 from lekka_ai.tools.submit import SubmitAnswerTool
 
 if TYPE_CHECKING:
@@ -184,22 +184,31 @@ class AgentRuntime:
             max_iterations=max_iterations,
         )
 
-        while iteration < max_iterations:
-            iteration += 1
+        breached_limit: str | None = None
 
+        while iteration < max_iterations:
             # Check execution time limit if configured
             if limits and limits.max_seconds is not None:
                 elapsed = time.perf_counter() - start_time
                 if elapsed >= limits.max_seconds:
-                    limits_hit.append("max_seconds")
-                    status = "max_iterations"
+                    breached_limit = "max_seconds"
                     break
 
             # Check token limit if configured
             if max_tokens is not None and (tokens_in + tokens_out) >= max_tokens:
-                limits_hit.append("max_tokens")
-                status = "max_iterations"
+                breached_limit = "max_tokens"
                 break
+
+            # Check tool call limit if configured
+            if (
+                limits
+                and limits.max_tool_calls is not None
+                and tool_calls_count >= limits.max_tool_calls
+            ):
+                breached_limit = "max_tool_calls"
+                break
+
+            iteration += 1
 
             # 1. Call LLM with current dialogue and authorized tool specs
             response = await llm.generate(
@@ -210,6 +219,15 @@ class AgentRuntime:
 
             tokens_in += response.usage.input_tokens
             tokens_out += response.usage.output_tokens
+
+            # Check token limit immediately after generation if configured
+            if max_tokens is not None and (tokens_in + tokens_out) >= max_tokens:
+                has_submit = any(
+                    tc.name == "submit_answer" for tc in response.tool_calls
+                )
+                if not has_submit:
+                    breached_limit = "max_tokens"
+                    break
 
             # 2. Check if model returned plain text without tool calls
             if not response.tool_calls:
@@ -366,13 +384,73 @@ class AgentRuntime:
                 and limits.max_tool_calls is not None
                 and tool_calls_count >= limits.max_tool_calls
             ):
-                limits_hit.append("max_tool_calls")
-                status = "max_iterations"
+                breached_limit = "max_tool_calls"
                 break
 
-        if iteration >= max_iterations and status == "running":
-            status = "max_iterations"
-            limits_hit.append("max_iterations")
+            # Check execution time limit if configured
+            if limits and limits.max_seconds is not None:
+                elapsed = time.perf_counter() - start_time
+                if elapsed >= limits.max_seconds:
+                    breached_limit = "max_seconds"
+                    break
+
+            if iteration >= max_iterations:
+                breached_limit = "max_iterations"
+                break
+
+        if (
+            iteration >= max_iterations
+            and status == "running"
+            and breached_limit is None
+            and submitted_answer is None
+        ):
+            breached_limit = "max_iterations"
+
+        # Handle forced submit when any execution limit was hit
+        if (
+            breached_limit is not None
+            and status == "running"
+            and submitted_answer is None
+        ):
+            if breached_limit not in limits_hit:
+                limits_hit.append(breached_limit)
+
+            (
+                forced_sub,
+                forced_status,
+                forced_text,
+                forced_stored,
+                extra_tc_count,
+                extra_tokens_in,
+                extra_tokens_out,
+            ) = await self._handle_forced_submit(
+                breached_limit=breached_limit,
+                task=task,
+                profile=profile,
+                llm=llm,
+                tool_view=tool_view,
+                messages=messages,
+                system_prompt=system_prompt,
+                limits_hit=limits_hit,
+                executed_tool_call_ids=executed_tool_call_ids,
+                tool_call_id_map=tool_call_id_map,
+                db_agent_run=db_agent_run,
+            )
+
+            iteration += 1
+            tokens_in += extra_tokens_in
+            tokens_out += extra_tokens_out
+            tool_calls_count += extra_tc_count
+
+            if forced_sub is not None:
+                submitted_answer = forced_sub
+                status = forced_status
+                final_text = forced_text
+                stored_claims = forced_stored
+            else:
+                # Hard-stop if agent still doesn't submit
+                status = "partial"
+                final_text = forced_text or final_text
 
         # Update and persist agent_runs row
         self._finalize_db_agent_run(
@@ -411,6 +489,134 @@ class AgentRuntime:
             repair_attempts=repair_attempts,
             stored_claims=stored_claims,
         )
+
+    async def _handle_forced_submit(
+        self,
+        *,
+        breached_limit: str,
+        task: AgentTask,
+        profile: AgentProfile,
+        llm: LLMClient,
+        tool_view: ToolView,
+        messages: list[Message],
+        system_prompt: str,
+        limits_hit: list[str],
+        executed_tool_call_ids: set[str],
+        tool_call_id_map: dict[str, uuid.UUID],
+        db_agent_run: Any,
+    ) -> tuple[SubmitAnswer | None, str, str | None, list[Any], int, int, int]:
+        """Send final instruction forcing submit_answer, or hard-stop."""
+        final_instruction = (
+            f"Execution limit reached ({breached_limit}). You must immediately call "
+            "submit_answer with status='partial' or status='insufficient_evidence'."
+        )
+        messages.append(Message(role="user", content=final_instruction))
+
+        forced_response = await llm.generate(
+            messages=messages,
+            tools=[tool_view.get("submit_answer").to_spec()],
+            system=system_prompt,
+        )
+
+        tokens_in = forced_response.usage.input_tokens
+        tokens_out = forced_response.usage.output_tokens
+
+        submit_call = next(
+            (tc for tc in forced_response.tool_calls if tc.name == "submit_answer"),
+            None,
+        )
+
+        if submit_call is None:
+            # Agent still did not submit -> hard stop
+            text_out = forced_response.text or ""
+            messages.append(Message(role="assistant", content=text_out))
+            return None, "partial", text_out, [], 0, tokens_in, tokens_out
+
+        messages.append(Message(role="assistant", content=forced_response.text or ""))
+
+        try:
+            if isinstance(submit_call.args, SubmitAnswer):
+                submission = submit_call.args
+            elif isinstance(submit_call.args, dict):
+                raw_args = dict(submit_call.args)
+                raw_st = str(raw_args.get("status", "")).strip().lower()
+                if raw_st not in ("partial", "insufficient_evidence"):
+                    raw_args["status"] = AnswerStatus.PARTIAL
+                submission = SubmitAnswer.model_validate(raw_args)
+            else:
+                submission = SubmitAnswer.model_validate(submit_call.args)
+
+            # Enforce status is partial or insufficient_evidence
+            if submission.status not in (
+                AnswerStatus.PARTIAL,
+                AnswerStatus.INSUFFICIENT_EVIDENCE,
+                "partial",
+                "insufficient_evidence",
+            ):
+                submission.status = AnswerStatus.PARTIAL
+
+            # Lower confidence automatically (cap at 0.5 and halve original)
+            orig_conf = float(submission.confidence)
+            lowered_conf = round(min(orig_conf * 0.5, 0.5), 2)
+            submission.confidence = lowered_conf
+
+            # Set limits_hit on the submission
+            for lim in limits_hit:
+                if lim not in submission.limits_hit:
+                    submission.limits_hit.append(lim)
+
+            # Filter out any claims with citation violations
+            valid_claims = []
+            for cl in submission.claims:
+                single_sub = SubmitAnswer(
+                    task_id=submission.task_id,
+                    agent_type=submission.agent_type,
+                    status=submission.status,
+                    claims=[cl],
+                    confidence=submission.confidence,
+                    confidence_rationale=submission.confidence_rationale,
+                )
+                errs = self._validate_citation_integrity(
+                    submission=single_sub,
+                    task=task,
+                    executed_tool_call_ids=executed_tool_call_ids,
+                )
+                if not errs:
+                    valid_claims.append(cl)
+            submission.claims = valid_claims
+
+            tool_output = await tool_view.execute(submit_call.name, submission)
+            messages.append(
+                Message(
+                    role="tool",
+                    content=wrap_tool_output(submit_call.name, tool_output),
+                )
+            )
+
+            stored = self._write_claims_to_ledger(
+                submission=submission,
+                task=task,
+                db_agent_run=db_agent_run,
+                tool_call_id_map=tool_call_id_map,
+            )
+
+            status_str = (
+                submission.status.value
+                if hasattr(submission.status, "value")
+                else str(submission.status)
+            )
+            return (
+                submission,
+                status_str,
+                submission.confidence_rationale,
+                stored,
+                1,
+                tokens_in,
+                tokens_out,
+            )
+        except Exception as exc:
+            logger.warning("Forced submit processing failed", error=str(exc))
+            return None, "partial", str(exc), [], 1, tokens_in, tokens_out
 
     @staticmethod
     def _parse_date(val: Any) -> date | None:

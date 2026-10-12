@@ -1,5 +1,6 @@
 """Unit and database tests for AgentRuntime inner loop execution."""
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ from lekka_ai.harness import (
 )
 from lekka_ai.llm.base import LLMResponse, ToolCall, Usage
 from lekka_ai.llm.fake import FakeLLM
+from lekka_ai.schemas.submit import AnswerStatus
 from lekka_ai.tools.base import Tool, ToolRegistry
 from lekka_ai.tracing import Tracer
 
@@ -76,12 +78,38 @@ class AddTool(Tool[AddInput, AddOutput]):
         return AddOutput(sum=input_data.x + input_data.y)
 
 
+class SlowInput(BaseModel):
+    """Input payload for SlowTool."""
+
+    delay: float = Field(..., description="Seconds to sleep")
+
+
+class SlowOutput(BaseModel):
+    """Output payload for SlowTool."""
+
+    elapsed: float = Field(..., description="Time elapsed")
+
+
+class SlowTool(Tool[SlowInput, SlowOutput]):
+    """Tool that asynchronously sleeps for testing time limits."""
+
+    name = "slow_tool"
+    description = "Sleeps for specified duration"
+    input_model = SlowInput
+    output_model = SlowOutput
+
+    async def run(self, input_data: SlowInput) -> SlowOutput:
+        await asyncio.sleep(input_data.delay)
+        return SlowOutput(elapsed=input_data.delay)
+
+
 @pytest.fixture
 def registry() -> ToolRegistry:
-    """Fixture providing a test registry with EchoTool and AddTool."""
+    """Fixture providing a test registry with EchoTool, AddTool, and SlowTool."""
     reg = ToolRegistry()
     reg.register(EchoTool())
     reg.register(AddTool())
+    reg.register(SlowTool())
     return reg
 
 
@@ -236,8 +264,8 @@ async def test_runtime_stops_on_max_iterations(registry: ToolRegistry) -> None:
         limits=Limits(max_iterations=2),
     )
 
-    assert result.status == "max_iterations"
-    assert result.iterations == 2
+    assert result.status in {"max_iterations", "partial"}
+    assert result.iterations in {2, 3}
     assert "max_iterations" in result.limits_hit
 
 
@@ -895,3 +923,266 @@ async def test_runtime_valid_claims_stored_in_ledger(
             next(session_generator)
         except StopIteration:
             pass
+
+
+@pytest.mark.asyncio
+async def test_runtime_limit_max_iterations_forced_submit(
+    registry: ToolRegistry,
+) -> None:
+    """Verify max_iterations breach triggers forced submit with lowered confidence."""
+    task = AgentTask(
+        task_id="task_iter_01",
+        agent_type="analyst",
+        instruction="Analyze revenue growth",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="Processing step 1",
+        tool_calls=[
+            ToolCall(id="tc_iter_1", name="echo_tool", args={"message": "step 1"})
+        ],
+        usage=Usage(input_tokens=15, output_tokens=10),
+    )
+    forced_submit_step = LLMResponse(
+        text="Submitting partial result under forced submit instruction",
+        tool_calls=[
+            ToolCall(
+                id="tc_sub_iter",
+                name="submit_answer",
+                args={
+                    "task_id": "task_iter_01",
+                    "agent_type": "analyst",
+                    "status": "completed",
+                    "claims": [],
+                    "confidence": 0.8,
+                    "confidence_rationale": "Confidence lowered due to max_iterations",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=20, output_tokens=15),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, forced_submit_step])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=1),
+    )
+
+    assert result.status == "partial"
+    assert result.submission is not None
+    assert result.submission.status == AnswerStatus.PARTIAL
+    assert result.submission.confidence == 0.4
+    assert "max_iterations" in result.limits_hit
+    assert "max_iterations" in result.submission.limits_hit
+
+
+@pytest.mark.asyncio
+async def test_runtime_limit_max_tokens_forced_submit(
+    registry: ToolRegistry,
+) -> None:
+    """Verify max_tokens breach triggers forced submit with lowered confidence."""
+    task = AgentTask(
+        task_id="task_token_01",
+        agent_type="analyst",
+        instruction="Analyze token budget",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="High token consumption step",
+        tool_calls=[
+            ToolCall(id="tc_tok_1", name="echo_tool", args={"message": "heavy"})
+        ],
+        usage=Usage(input_tokens=30, output_tokens=20),
+    )
+    forced_submit_step = LLMResponse(
+        text="Submitting under token exhaustion",
+        tool_calls=[
+            ToolCall(
+                id="tc_sub_tok",
+                name="submit_answer",
+                args={
+                    "task_id": "task_token_01",
+                    "agent_type": "analyst",
+                    "status": "partial",
+                    "claims": [],
+                    "confidence": 0.7,
+                    "confidence_rationale": "High token usage forced submission",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, forced_submit_step])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_tokens=40),
+    )
+
+    assert result.status == "partial"
+    assert result.submission is not None
+    assert result.submission.status == AnswerStatus.PARTIAL
+    assert result.submission.confidence == 0.35
+    assert "max_tokens" in result.limits_hit
+    assert "max_tokens" in result.submission.limits_hit
+
+
+@pytest.mark.asyncio
+async def test_runtime_limit_max_seconds_forced_submit(
+    registry: ToolRegistry,
+) -> None:
+    """Verify max_seconds breach triggers forced submit with insufficient_evidence."""
+    task = AgentTask(
+        task_id="task_sec_01",
+        agent_type="analyst",
+        instruction="Long running query",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["slow_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="Executing slow tool",
+        tool_calls=[ToolCall(id="tc_slow_1", name="slow_tool", args={"delay": 0.05})],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    forced_submit_step = LLMResponse(
+        text="Submitting insufficient evidence due to time limit",
+        tool_calls=[
+            ToolCall(
+                id="tc_sub_sec",
+                name="submit_answer",
+                args={
+                    "task_id": "task_sec_01",
+                    "agent_type": "analyst",
+                    "status": "insufficient_evidence",
+                    "claims": [],
+                    "confidence": 0.4,
+                    "confidence_rationale": "Timed out waiting for slow tool",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, forced_submit_step])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_seconds=0.02),
+    )
+
+    assert result.status == "insufficient_evidence"
+    assert result.submission is not None
+    assert result.submission.status == AnswerStatus.INSUFFICIENT_EVIDENCE
+    assert result.submission.confidence == 0.2
+    assert "max_seconds" in result.limits_hit
+    assert "max_seconds" in result.submission.limits_hit
+
+
+@pytest.mark.asyncio
+async def test_runtime_limit_max_tool_calls_forced_submit(
+    registry: ToolRegistry,
+) -> None:
+    """Verify max_tool_calls breach triggers forced submit."""
+    task = AgentTask(
+        task_id="task_tc_01",
+        agent_type="analyst",
+        instruction="Tool call budget check",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="First tool call",
+        tool_calls=[
+            ToolCall(id="tc_echo_1", name="echo_tool", args={"message": "call 1"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    forced_submit_step = LLMResponse(
+        text="Submitting answer after hitting max tool calls",
+        tool_calls=[
+            ToolCall(
+                id="tc_sub_tc",
+                name="submit_answer",
+                args={
+                    "task_id": "task_tc_01",
+                    "agent_type": "analyst",
+                    "status": "partial",
+                    "claims": [],
+                    "confidence": 0.6,
+                    "confidence_rationale": "Tool call count reached threshold",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, forced_submit_step])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_tool_calls=1),
+    )
+
+    assert result.status == "partial"
+    assert result.submission is not None
+    assert result.submission.status == AnswerStatus.PARTIAL
+    assert result.submission.confidence == 0.3
+    assert "max_tool_calls" in result.limits_hit
+    assert "max_tool_calls" in result.submission.limits_hit
+
+
+@pytest.mark.asyncio
+async def test_runtime_limit_hard_stop_when_agent_refuses_to_submit(
+    registry: ToolRegistry,
+) -> None:
+    """Verify runtime hard stops if the agent does not submit when forced."""
+    task = AgentTask(
+        task_id="task_hardstop_01",
+        agent_type="analyst",
+        instruction="Stubborn agent query",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="Tool call",
+        tool_calls=[
+            ToolCall(id="tc_echo_hs", name="echo_tool", args={"message": "hs"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    refusal_step = LLMResponse(
+        text="I refuse to call submit_answer.",
+        tool_calls=[],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, refusal_step])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_tool_calls=1),
+    )
+
+    assert result.status == "partial"
+    assert result.submission is None
+    assert "max_tool_calls" in result.limits_hit
+    assert "I refuse to call submit_answer." in (result.final_text or "")
