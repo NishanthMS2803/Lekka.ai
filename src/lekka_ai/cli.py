@@ -284,6 +284,18 @@ def ask(
             )
             for k, v in stats_dict.items():
                 console.print(f"      - {k}: {v}")
+        if hasattr(ext, "scenario_values") and ext.scenario_values:
+            console.print("  • [bold]Scenario Values:[/bold]")
+            scen_dict = (
+                ext.scenario_values.model_dump()
+                if hasattr(ext.scenario_values, "model_dump")
+                else ext.scenario_values
+            )
+            for k, v in scen_dict.items():
+                console.print(f"      - {k}: {v}")
+        if hasattr(ext, "implied_growth") and ext.implied_growth is not None:
+            pct_str = f"{ext.implied_growth * 100:.2f}%"
+            console.print(f"  • [bold]Implied Growth (Reverse DCF):[/bold] {pct_str}")
 
     # Claims table
     if submission and submission.claims:

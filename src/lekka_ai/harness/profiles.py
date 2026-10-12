@@ -242,3 +242,39 @@ def create_market_profile(
 
 
 MARKET_PROFILE: AgentProfile = create_market_profile()
+
+DEFAULT_VALUATION_TOOLS: list[str] = [
+    "get_market_data",
+    "get_financials",
+    "get_analyst_estimates",
+    "run_dcf",
+    "run_reverse_dcf",
+    "compute_multiples",
+    "scenario_table",
+    "run_python",
+    "submit_answer",
+]
+
+
+def create_valuation_profile(
+    registry: ToolRegistry | None = None,
+    system_prompt_path: str | Path | None = None,
+) -> AgentProfile:
+    """Create or load the standard 'valuation' AgentProfile."""
+    try:
+        return load_agent_profile("valuation", registry=registry)
+    except Exception:
+        valuation_prompt_cand = (
+            Path(system_prompt_path)
+            if system_prompt_path
+            else Path("agents/prompts/valuation.md")
+        )
+        return AgentProfile(
+            agent_type="valuation",
+            allowed_tools=list(DEFAULT_VALUATION_TOOLS),
+            system_prompt_path=str(valuation_prompt_cand),
+            answer_extension_schema="lekka_ai.schemas.valuation:ValuationAnswerExtension",
+        )
+
+
+VALUATION_PROFILE: AgentProfile = create_valuation_profile()

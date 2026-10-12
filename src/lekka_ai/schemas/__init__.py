@@ -11,6 +11,10 @@ from lekka_ai.schemas.submit import (
     get_answer_extension,
     register_answer_extension,
 )
+from lekka_ai.schemas.valuation import (
+    ScenarioValues,
+    ValuationAnswerExtension,
+)
 
 __all__ = [
     "AnswerExtension",
@@ -19,7 +23,9 @@ __all__ = [
     "ClaimType",
     "Evidence",
     "MarketAnswerExtension",
+    "ScenarioValues",
     "SubmitAnswer",
+    "ValuationAnswerExtension",
     "clear_answer_extensions",
     "export_submit_answer_schema",
     "get_answer_extension",
