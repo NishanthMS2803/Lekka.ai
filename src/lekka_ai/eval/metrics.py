@@ -129,9 +129,19 @@ def numeric_accuracy_metric(
     return 0.0
 
 
+def factual_accuracy_metric(result: RunResult, example: EvalExample) -> float:
+    """Evaluate factual accuracy using programmatic NumericGrader."""
+    from lekka_ai.eval.grader import NumericGrader
+
+    grader = NumericGrader()
+    grade = grader.grade(result, example)
+    return grade.score
+
+
 DEFAULT_METRICS: dict[str, MetricFunc] = {
     "success": success_metric,
     "accuracy": numeric_accuracy_metric,
+    "factual_accuracy": factual_accuracy_metric,
     "claims": claim_count_metric,
     "tool_calls": tool_calls_metric,
     "latency_ms": latency_metric,

@@ -6,11 +6,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvalExample(BaseModel):
     """A single evaluation benchmark example."""
+
+    model_config = ConfigDict(extra="allow")
 
     id: str = Field(..., description="Unique identifier for the benchmark item")
     question: str = Field(..., description="Financial question or research query")
@@ -26,6 +28,16 @@ class EvalExample(BaseModel):
             "Query type (e.g. 'factual', 'calculation', "
             "'point_in_time', 'unanswerable')"
         ),
+    )
+    metric: str | None = Field(
+        default=None, description="Target financial metric evaluated"
+    )
+    expected_value: Any = Field(default=None, description="Ground truth target value")
+    tolerance: float | None = Field(
+        default=None, description="Allowed deviation ratio (e.g. 0.02 for 2%)"
+    )
+    source_accession: str | None = Field(
+        default=None, description="SEC accession reference number"
     )
     expected: Any = Field(
         default=None,

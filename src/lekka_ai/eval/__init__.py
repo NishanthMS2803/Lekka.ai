@@ -1,6 +1,11 @@
 """Evaluation harness for benchmarking specialist agent variants against baselines."""
 
-from lekka_ai.eval.dataset import EvalExample, load_dataset, save_dataset
+from lekka_ai.eval.grader import (
+    ExtractedNumber,
+    GradeResult,
+    NumericGrader,
+    factual_accuracy_metric,
+)
 from lekka_ai.eval.metrics import (
     DEFAULT_METRICS,
     MetricFunc,
@@ -27,13 +32,17 @@ __all__ = [
     "EvalExample",
     "EvalRunner",
     "EvalSummary",
+    "ExtractedNumber",
+    "GradeResult",
     "MetricFunc",
+    "NumericGrader",
     "RunResult",
     "StubVariant",
     "Variant",
     "VariantAggregate",
     "claim_count_metric",
     "cost_metric",
+    "factual_accuracy_metric",
     "latency_metric",
     "load_dataset",
     "numeric_accuracy_metric",
