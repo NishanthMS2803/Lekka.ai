@@ -107,6 +107,76 @@ Lekka AI includes a comprehensive quantitative valuation suite accessible direct
 
 ---
 
+## Agent Harness & Runtime Architecture
+
+Lekka AI features an enterprise agent execution and safety harness (`src/lekka_ai/harness/`) designed for rigorous equity research:
+
+- **Config-Driven Profiles (`agents/profiles.yaml`)**:
+  Declarative YAML configuration specifying tool permissions, system prompt paths (`agents/prompts/*.md`), default execution limits, and typed answer extension schemas.
+- **Strict Tool Permissions & Isolation (`ToolView`)**:
+  Agents operate through sandboxed `ToolView` proxies. Calls to unpermitted tools are blocked upfront and raise `PermissionDenied`, preventing privilege escalation and cross-specialist contamination.
+- **Multi-Turn Autonomous Loop (`AgentRuntime`)**:
+  Orchestrates LLM turns with configurable safety boundaries (maximum iterations, token caps, runtime budgets, repair attempt limits).
+- **Self-Healing Validation Repair**:
+  If a tool payload or submission fails Pydantic schema validation, the runtime feeds the exact validation error back to the LLM for automated in-flight repair (up to 3 attempts).
+- **Claim Ledger & Provenance Verification**:
+  Submissions require structured claims (`fact`, `calculation`, `interpretation`, `background`). The runtime strictly validates citation integrity, ensuring every cited `tool_call_id` was legitimately executed by the agent.
+- **Untrusted Content Isolation**:
+  External third-party text (e.g. news headlines, press releases) is automatically wrapped in `<untrusted_data>` delimiter tags with escaped closing tags, neutralizing prompt injection attacks.
+- **Full Audit Tracing (`Tracer`)**:
+  Every LLM generation and tool execution produces an immutable telemetry trace recorded to SQLite/PostgreSQL with inputs, outputs, errors, token counts, and latency.
+
+---
+
+## Specialist Agent Roster
+
+| Agent Profile | Role & Responsibilities | Authorized Tools | Typed Extension |
+|---|---|---|---|
+| **`analyst`** | Generalist equity analyst performing comprehensive fundamental and quantitative research. Enforces evidence-backed claims and permits explicit insufficient evidence responses. | `get_market_data`, `get_financials`, `list_filings`, `search_filings`, `get_news`, `get_analyst_estimates`, `get_industry_data`, `run_dcf`, `run_reverse_dcf`, `compute_multiples`, `scenario_table`, `compute_risk_stats`, `echo`, `submit_answer` | Standard Submission |
+| **`market`** | Technical & price action specialist. Analyzes historical price movements, annualized volatility, drawdowns, beta relative to SPY, relative strength, and moving average trend classifications. Strictly prohibited from issuing investment verdicts. | `get_market_data`, `compute_risk_stats`, `submit_answer` | `MarketAnswerExtension` (trend label, beta, volatility, moving averages) |
+| **`valuation`** | Quantitative valuation specialist. Builds explicit Bear / Base / Bull scenario models, solves reverse DCF for market-implied growth expectations, and reports sensitivity grids. Zero mental math rule enforced; complex custom calculations executed via Python sandbox. | `get_market_data`, `get_financials`, `get_analyst_estimates`, `run_dcf`, `run_reverse_dcf`, `compute_multiples`, `scenario_table`, `run_python`, `submit_answer` | `ValuationAnswerExtension` (bear/base/bull values, implied growth, current price) |
+| **`news`** | Corporate catalyst and developments specialist. Discovers recent news developments and SEC Form 8-K filings with dates. Classifies each catalyst across two dimensions: impact (`positive`, `negative`, `neutral`, `uncertain`) and novelty (`new` vs `already_known`). Treats all news text as untrusted. | `get_news`, `list_filings`, `search_filings`, `submit_answer` | `NewsAnswerExtension` (structured catalyst list, impact, novelty, source) |
+
+---
+
+## Command Line Interface (CLI)
+
+Lekka AI includes a Typer-powered CLI (`lekka-ai ask`) for interactive research queries:
+
+```bash
+# Query the generic baseline analyst
+uv run lekka-ai ask "What was Apple's revenue and operating income in FY2023?" --as-of 2024-01-15
+
+# Query the market specialist
+uv run lekka-ai ask "Evaluate price action and beta for AAPL relative to SPY" --agent market --as-of 2024-09-20
+
+# Query the valuation specialist
+uv run lekka-ai ask "Build DCF scenarios and reverse DCF for AAPL" --agent valuation --as-of 2024-09-20
+
+# Query the news and catalyst specialist
+uv run lekka-ai ask "Identify recent material catalysts and 8-K filings for AAPL" --agent news --as-of 2024-09-20
+
+# Run direct LLM baseline (zero tools)
+uv run lekka-ai ask "What was AAPL free cash flow in 2023?" --variant direct
+```
+
+---
+
+## Evaluation & Benchmarking Harness
+
+The evaluation harness (`src/lekka_ai/eval/`) evaluates and benchmarks model variants against curated ground-truth datasets:
+
+```bash
+# Run fact-checking benchmark across direct LLM and single agent
+make eval VARIANTS=direct,single DATASET=eval/datasets/facts_v0.jsonl
+```
+
+- **Pluggable Variants**: Compare `direct` (unassisted zero-tool LLM) vs `single` (autonomous tool-calling agent runtime).
+- **Programmatic Graders**: Extracts numeric values and scales across units (thousands, millions, billions) to evaluate `factual_accuracy` within configurable percentage tolerances.
+- **Metric Reporting**: Outputs summary tables with accuracy percentages, token usage, tool call counts, latency, and costs saved to `eval/results/`.
+
+---
+
 ## Makefile Targets
 
 | Command | Description |
@@ -120,4 +190,5 @@ Lekka AI includes a comprehensive quantitative valuation suite accessible direct
 | `make db-down` | Stop PostgreSQL Docker container |
 | `make db-logs` | Stream logs from the database container |
 | `make ingest TICKER=AAPL` | Ingest, parse, chunk, and embed latest 10-K & 10-Q filings |
+| `make eval` | Run evaluation benchmark on dataset across specified variants |
 
