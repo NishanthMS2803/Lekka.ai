@@ -1,5 +1,13 @@
 """Quantitative analysis and statistical modules for Lekka AI."""
 
+from lekka_ai.quant.dcf import (
+    CashFlowPeriod,
+    DCFAssumptions,
+    DCFResult,
+    compute_dcf,
+    dcf,
+    validate_dcf_inputs,
+)
 from lekka_ai.quant.fundamentals import (
     DerivedFinancials,
     compute_derived_financials,
@@ -30,13 +38,18 @@ from lekka_ai.quant.stats import (
 )
 
 __all__ = [
+    "CashFlowPeriod",
+    "DCFAssumptions",
+    "DCFResult",
     "DerivedFinancials",
     "MaxDrawdownResult",
     "align_series",
     "annualized_volatility",
     "beta",
+    "compute_dcf",
     "compute_derived_financials",
     "correlation",
+    "dcf",
     "ema",
     "exponential_moving_average",
     "free_cash_flow",
@@ -53,5 +66,6 @@ __all__ = [
     "simple_moving_average",
     "simple_returns",
     "sma",
+    "validate_dcf_inputs",
     "yoy_growth",
 ]
