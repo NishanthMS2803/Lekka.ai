@@ -17,11 +17,17 @@ from lekka_ai.llm.base import (
     ToolSpec,
     Usage,
 )
+from lekka_ai.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _is_transient_error(exc: BaseException) -> bool:
     """Identify retryable 429 rate limit or 5xx transient server errors."""
     if isinstance(exc, errors.APIError):
+        msg = str(exc).lower()
+        if "quota exceeded" in msg or "resource_exhausted" in msg:
+            return False
         code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
         return code in {429, 500, 502, 503, 504}
     return False
@@ -211,12 +217,46 @@ class GeminiClient(LLMClient):
 
         config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
-        response = await _generate_with_retry(
-            self.client,
+        candidate_models = [
             self.model,
-            contents,
-            config,
-        )
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
+        ]
+        # Deduplicate while preserving order
+        models_to_try = list(dict.fromkeys(candidate_models))
+
+        response = None
+        last_exc: Exception | None = None
+        for m_name in models_to_try:
+            try:
+                response = await _generate_with_retry(
+                    self.client,
+                    m_name,
+                    contents,
+                    config,
+                )
+                self.model = m_name
+                break
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                if (
+                    "quota" in exc_str
+                    or "resource_exhausted" in exc_str
+                    or "429" in exc_str
+                ):
+                    logger.warning(
+                        "Gemini model quota reached, falling back to next model",
+                        exhausted_model=m_name,
+                    )
+                    last_exc = exc
+                    continue
+        if response is None:
+            if last_exc:
+                raise last_exc
+            raise RuntimeError("Gemini model generation failed to return a response")
 
         parsed_tool_calls: list[ToolCall] = []
         if getattr(response, "function_calls", None):

@@ -31,6 +31,9 @@ class RunResult(BaseModel):
         description="Structured claims returned by the variant",
     )
     cost: float = Field(default=0.0, description="Estimated monetary cost in USD")
+    tokens_in: int = Field(default=0, description="Prompt input tokens")
+    tokens_out: int = Field(default=0, description="Completion output tokens")
+    tokens_total: int = Field(default=0, description="Total tokens consumed")
     latency_ms: float = Field(
         default=0.0, description="Execution latency in milliseconds"
     )
@@ -173,6 +176,9 @@ class DirectVariant(Variant):
                 answer=agent_res.final_text or "",
                 claims=claims,
                 cost=est_cost,
+                tokens_in=agent_res.tokens_in,
+                tokens_out=agent_res.tokens_out,
+                tokens_total=agent_res.tokens_in + agent_res.tokens_out,
                 latency_ms=elapsed_ms,
                 tool_calls=agent_res.tool_calls_count,
                 raw=agent_res,
@@ -261,6 +267,9 @@ class AgentVariant(Variant):
                 answer=answer_text,
                 claims=claims,
                 cost=est_cost,
+                tokens_in=agent_res.tokens_in,
+                tokens_out=agent_res.tokens_out,
+                tokens_total=agent_res.tokens_in + agent_res.tokens_out,
                 latency_ms=elapsed_ms,
                 tool_calls=agent_res.tool_calls_count,
                 raw=agent_res,

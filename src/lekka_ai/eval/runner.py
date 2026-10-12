@@ -33,6 +33,8 @@ class VariantAggregate(BaseModel):
     accuracy: float = Field(default=0.0, description="Average numeric accuracy score")
     avg_claims: float = Field(default=0.0, description="Average number of claims")
     avg_tool_calls: float = Field(default=0.0, description="Average tool invocations")
+    avg_tokens: float = Field(default=0.0, description="Average tokens per run")
+    total_tokens: int = Field(default=0, description="Total tokens consumed")
     avg_latency_ms: float = Field(default=0.0, description="Average latency in ms")
     total_cost: float = Field(default=0.0, description="Total estimated cost in USD")
     metric_averages: dict[str, float] = Field(
@@ -171,6 +173,7 @@ class EvalRunner:
             accuracy_sum = sum(float(r.metrics.get("accuracy", 0.0)) for r in v_results)
             claims_sum = sum(len(r.claims) for r in v_results)
             tools_sum = sum(r.tool_calls for r in v_results)
+            tokens_sum = sum(r.tokens_total for r in v_results)
             latency_sum = sum(r.latency_ms for r in v_results)
             cost_sum = sum(r.cost for r in v_results)
 
@@ -192,6 +195,8 @@ class EvalRunner:
                 accuracy=round(accuracy_sum / count, 4),
                 avg_claims=round(claims_sum / count, 2),
                 avg_tool_calls=round(tools_sum / count, 2),
+                avg_tokens=round(tokens_sum / count, 1),
+                total_tokens=tokens_sum,
                 avg_latency_ms=round(latency_sum / count, 2),
                 total_cost=round(cost_sum, 6),
                 metric_averages=metric_averages,
@@ -217,12 +222,13 @@ class EvalRunner:
             show_header=True,
             expand=True,
         )
-        table.add_column("Variant", style="bold white", width=18)
+        table.add_column("Variant", style="bold white", width=16)
         table.add_column("Count", justify="right", width=7)
         table.add_column("Success Rate", justify="right", width=14)
         table.add_column("Accuracy", justify="right", width=11)
         table.add_column("Avg Claims", justify="right", width=12)
         table.add_column("Avg Tools", justify="right", width=11)
+        table.add_column("Avg Tokens", justify="right", width=12)
         table.add_column("Avg Latency", justify="right", width=14)
         table.add_column("Total Cost", justify="right", width=13)
 
@@ -239,6 +245,7 @@ class EvalRunner:
                 acc_pct,
                 f"{agg.avg_claims:.1f}",
                 f"{agg.avg_tool_calls:.1f}",
+                f"{agg.avg_tokens:.0f}",
                 lat_str,
                 cost_str,
             )
