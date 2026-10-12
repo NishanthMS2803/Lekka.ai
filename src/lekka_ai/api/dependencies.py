@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from lekka_ai.api.services import RunManager, default_run_manager
 from lekka_ai.config import get_settings
 from lekka_ai.db.session import get_session
+from lekka_ai.events import EventBus, default_event_bus
 from lekka_ai.llm.base import LLMClient
 from lekka_ai.llm.gemini import GeminiClient
 from lekka_ai.orchestrator.engine import TaskRunnerCallable
@@ -37,6 +38,11 @@ def get_tool_registry() -> ToolRegistry | None:
 def get_run_manager() -> RunManager:
     """Provide the active RunManager instance."""
     return default_run_manager
+
+
+def get_event_bus() -> EventBus:
+    """Provide the active EventBus instance."""
+    return default_event_bus
 
 
 def get_optional_db_session() -> Generator[Session | None, None, None]:

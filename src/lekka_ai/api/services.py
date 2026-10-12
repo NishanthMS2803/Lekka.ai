@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.repository import create_run, get_run
+from lekka_ai.events import EventBus, default_event_bus
 from lekka_ai.llm.base import LLMClient
 from lekka_ai.logging import get_logger
 from lekka_ai.orchestrator.budget import RunBudget
@@ -28,6 +29,7 @@ from lekka_ai.report.confidence import (
 from lekka_ai.report.synthesize import SynthesizedReport
 from lekka_ai.schemas.claims import Claim
 from lekka_ai.tools.base import ToolRegistry
+from lekka_ai.tracing import Tracer
 
 logger = get_logger(__name__)
 
@@ -47,6 +49,8 @@ class RunRecord:
     report: SynthesizedReport | None = None
     confidence_breakdown: ConfidenceBreakdown | None = None
     claims: list[Claim] = field(default_factory=list)
+    tracer: Tracer | None = None
+    budget_manager: RunBudget | None = None
     error: str | None = None
     completed_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -54,9 +58,10 @@ class RunRecord:
 class RunManager:
     """Manager coordinating background runs, outcomes, reports, and claims."""
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: EventBus | None = None) -> None:
         self._runs: dict[str, RunRecord] = {}
         self._claims_by_id: dict[str, Claim] = {}
+        self.event_bus = event_bus or default_event_bus
 
     def create_run(
         self,
@@ -142,16 +147,29 @@ class RunManager:
             except Exception as e:
                 logger.warning("DB run sync initial update failed", error=str(e))
 
-        # Setup ledger if session is provided
-        ledger = LedgerRepository(session) if session is not None else None
+        # Setup tracer
+        tracer = Tracer(session=session, run_id=run_id, event_bus=self.event_bus)
+        record.tracer = tracer
 
         # Build budget
         budget: RunBudget
         if record.budget:
-            budget = RunBudget(**record.budget)
+            budget = RunBudget(tracer=tracer, **record.budget)
         else:
-            budget = RunBudget.from_settings()
+            budget = RunBudget.from_settings(tracer=tracer)
+        record.budget_manager = budget
 
+        # Emit run_started event
+        await self.event_bus.emit(
+            run_id,
+            "run_started",
+            {
+                "question": record.question,
+                "as_of_date": record.as_of_date,
+            },
+        )
+
+        ledger = LedgerRepository(session) if session is not None else None
         try:
             outcome = await run_engine(
                 question=record.question,
@@ -161,7 +179,10 @@ class RunManager:
                 tool_registry=tool_registry,
                 ledger=ledger,
                 session=session,
+                tracer=tracer,
                 available_profiles=available_profiles,
+                event_bus=self.event_bus,
+                run_id=run_id,
             )
 
             # Collect claims from all completed tasks
@@ -198,6 +219,26 @@ class RunManager:
 
             self.store_claims(run_id, all_claims)
 
+            if outcome.status == "failed":
+                record.status = "failed"
+                record.error = outcome.error or "Run execution failed"
+                record.outcome = outcome
+                if session is not None:
+                    try:
+                        db_run = get_run(session, uuid.UUID(run_id))
+                        if db_run is not None:
+                            db_run.status = "failed"
+                            db_run.finished_at = datetime.now(UTC)
+                            session.commit()
+                    except Exception as e:
+                        logger.warning("DB run update failed", error=str(e))
+                await self.event_bus.emit(
+                    run_id,
+                    "run_failed",
+                    {"error": record.error},
+                )
+                return
+
             # Extract ticker if available
             ticker: str | None = None
             if outcome.state and outcome.state.parsed_query:
@@ -231,6 +272,27 @@ class RunManager:
                 except Exception as e:
                     logger.warning("DB run update final status failed", error=str(e))
 
+            # Emit verification_done and report_ready events
+            await self.event_bus.emit(
+                run_id,
+                "verification_done",
+                {
+                    "confidence_score": breakdown.confidence_score,
+                    "is_abstention": breakdown.is_abstention,
+                    "missing_evidence": breakdown.missing_evidence,
+                },
+            )
+            await self.event_bus.emit(
+                run_id,
+                "report_ready",
+                {
+                    "status": record.status,
+                    "validation_passed": report.validation_passed,
+                    "confidence_score": breakdown.confidence_score,
+                    "is_abstention": breakdown.is_abstention,
+                },
+            )
+
             logger.info(
                 "Run execution finished",
                 run_id=run_id,
@@ -243,6 +305,11 @@ class RunManager:
             logger.error("Run execution failed", run_id=run_id, error=err_msg)
             record.status = "failed"
             record.error = err_msg
+            await self.event_bus.emit(
+                run_id,
+                "run_failed",
+                {"error": err_msg},
+            )
         finally:
             record.completed_event.set()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -140,6 +141,8 @@ class OrchestrationEngine:
         ledger: LedgerRepository | None = None,
         session: Session | None = None,
         tracer: Tracer | None = None,
+        event_bus: Any | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Initialize OrchestrationEngine with configuration and dependencies."""
         if max_rounds < 1:
@@ -159,6 +162,8 @@ class OrchestrationEngine:
         self.ledger = ledger
         self.session = session
         self.tracer = tracer
+        self.event_bus = event_bus
+        self.run_id = run_id
 
     async def run(
         self,
@@ -245,9 +250,29 @@ class OrchestrationEngine:
                 )
 
             state = RunState(
+                run_id=self.run_id or str(uuid.uuid4()),
                 question=question,
                 parsed_query=parsed_query.model_dump(),
                 plan=plan,
+            )
+
+        if self.run_id and state.run_id != self.run_id:
+            state.run_id = self.run_id
+
+        if self.event_bus and state.run_id:
+            await self.event_bus.emit(
+                state.run_id,
+                "plan_created",
+                {
+                    "task_count": len(state.plan.tasks),
+                    "tasks": [t.model_dump() for t in state.plan.tasks],
+                    "intent": state.parsed_query.get("intent")
+                    if state.parsed_query
+                    else None,
+                    "tickers": state.parsed_query.get("tickers", [])
+                    if state.parsed_query
+                    else [],
+                },
             )
 
         # -------------------------------------------------------------
@@ -273,7 +298,52 @@ class OrchestrationEngine:
                 tracer=self.tracer,
             )
 
-        effective_runner = self.task_runner or _default_dispatch_runner
+        raw_runner = self.task_runner or _default_dispatch_runner
+
+        async def _event_emitting_runner(
+            task: PlannedTask,
+            scratch_dir: Path,
+        ) -> TaskResult:
+            if self.event_bus and state.run_id:
+                await self.event_bus.emit(
+                    state.run_id,
+                    "task_started",
+                    {
+                        "task_id": task.task_id,
+                        "agent_type": task.agent_type,
+                        "instruction": task.instruction,
+                        "priority": task.priority,
+                    },
+                )
+
+            res = await raw_runner(task, scratch_dir)
+
+            if self.event_bus and state.run_id:
+                tool_calls_count = res.usage.get("tool_calls", 0) if res.usage else 0
+                if tool_calls_count > 0:
+                    await self.event_bus.emit(
+                        state.run_id,
+                        "tool_called",
+                        {
+                            "task_id": task.task_id,
+                            "agent_type": task.agent_type,
+                            "count": tool_calls_count,
+                        },
+                    )
+
+                await self.event_bus.emit(
+                    state.run_id,
+                    "task_completed",
+                    {
+                        "task_id": task.task_id,
+                        "agent_type": task.agent_type,
+                        "status": res.status,
+                        "claims_count": len(res.claims),
+                    },
+                )
+            return res
+
+        effective_runner = _event_emitting_runner
         from lekka_ai.harness.scheduler import TaskScheduler
 
         scheduler = TaskScheduler(
@@ -409,6 +479,20 @@ class OrchestrationEngine:
             last_decision = decision
             action = decision.action
 
+            if self.event_bus and state.run_id:
+                await self.event_bus.emit(
+                    state.run_id,
+                    "gap_check",
+                    {
+                        "round": round_number,
+                        "action": decision.action.value,
+                        "reasons": decision.reasons,
+                        "follow_up_tasks": [
+                            t.model_dump() for t in decision.follow_up_tasks
+                        ],
+                    },
+                )
+
             # Decision Action 1: DONE
             if action == GapCheckAction.DONE:
                 logger.info("Gap check audit concluded: DONE", round=round_number)
@@ -504,6 +588,8 @@ async def run_engine(
     session: Session | None = None,
     tracer: Tracer | None = None,
     available_profiles: dict[str, AgentProfile] | Iterable[str] | None = None,
+    event_bus: Any | None = None,
+    run_id: str | None = None,
 ) -> RunOutcome:
     """Run the complete multi-wave orchestration engine loop.
 
@@ -524,6 +610,8 @@ async def run_engine(
         ledger=ledger,
         session=session,
         tracer=tracer,
+        event_bus=event_bus,
+        run_id=run_id,
     )
     return await engine.run(
         question=question,

@@ -158,3 +158,45 @@ def claim_to_response(claim: Claim | ClaimModel | dict[str, Any]) -> ClaimRespon
         depends_on=list(schema.depends_on or []),
         evidence=evidence_items,
     )
+
+
+class SpanResponse(BaseModel):
+    """Instrumentation span record from execution tracer."""
+
+    name: str = Field(..., description="Span name")
+    id: str = Field(..., description="Unique span UUID")
+    parent_id: str | None = Field(default=None, description="Parent span UUID")
+    start_time: str = Field(..., description="ISO start timestamp")
+    end_time: str | None = Field(default=None, description="ISO end timestamp")
+    latency_ms: int | None = Field(default=None, description="Latency in milliseconds")
+    status: str = Field(default="ok", description="Span status (ok, error, running)")
+    error: str | None = Field(default=None, description="Error message if failed")
+    span_type: str = Field(default="generic", description="Classification of span")
+    tool_name: str | None = Field(default=None, description="Tool name if tool span")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CostTotalsResponse(BaseModel):
+    """Cumulative resource and cost metrics for a run."""
+
+    total_tokens: int = Field(default=0, description="Total tokens used")
+    tokens_in: int = Field(default=0, description="Input tokens used")
+    tokens_out: int = Field(default=0, description="Output tokens used")
+    tool_calls: int = Field(default=0, description="Number of tool calls executed")
+    elapsed_seconds: float = Field(default=0.0, description="Total elapsed seconds")
+    estimated_cost_usd: float = Field(
+        default=0.0, description="Estimated total cost in USD"
+    )
+
+
+class RunTraceResponse(BaseModel):
+    """Execution trace report containing spans and resource cost totals."""
+
+    run_id: str = Field(..., description="Unique ID of the run")
+    spans: list[SpanResponse] = Field(
+        default_factory=list, description="All execution spans recorded"
+    )
+    cost_totals: CostTotalsResponse = Field(
+        default_factory=CostTotalsResponse,
+        description="Cumulative tokens, tool calls, and USD cost totals",
+    )

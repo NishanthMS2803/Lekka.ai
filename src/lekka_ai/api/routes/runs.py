@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from lekka_ai.api.dependencies import (
+    get_event_bus,
     get_llm,
     get_optional_db_session,
     get_run_manager,
@@ -17,17 +20,22 @@ from lekka_ai.api.dependencies import (
 )
 from lekka_ai.api.models import (
     ClaimResponse,
+    CostTotalsResponse,
     CreateRunRequest,
     RunCreateResponse,
     RunReportResponse,
     RunStatusResponse,
+    RunTraceResponse,
+    SpanResponse,
     claim_to_response,
 )
 from lekka_ai.api.services import RunManager
 from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.repository import get_run as get_db_run
+from lekka_ai.events import EventBus
 from lekka_ai.llm.base import LLMClient
-from lekka_ai.orchestrator.engine import TaskRunnerCallable
+from lekka_ai.orchestrator.dispatch import TaskResult
+from lekka_ai.orchestrator.engine import RunOutcome, TaskRunnerCallable
 from lekka_ai.tools.base import ToolRegistry
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -119,7 +127,14 @@ async def get_run_status(
     outcome_dict: dict[str, Any] | None = None
     if record.outcome is not None:
         if hasattr(record.outcome, "model_dump"):
-            outcome_dict = record.outcome.model_dump()
+            try:
+                outcome_dict = record.outcome.model_dump(mode="json")
+            except Exception:
+                outcome_dict = {
+                    "status": record.status,
+                    "stop_reason": record.stop_reason,
+                    "rounds": record.rounds,
+                }
         elif isinstance(record.outcome, dict):
             outcome_dict = record.outcome
         else:
@@ -247,3 +262,112 @@ async def get_run_claims(
         claims = record.claims
 
     return [claim_to_response(c) for c in claims]
+
+
+@router.get(
+    "/{run_id}/events",
+    summary="Stream research run events as Server-Sent Events (SSE)",
+)
+async def get_run_events(
+    run_id: str,
+    run_manager: Annotated[RunManager, Depends(get_run_manager)],
+    event_bus: Annotated[EventBus, Depends(get_event_bus)],
+) -> StreamingResponse:
+    """Stream real-time and historical events for run via SSE protocol."""
+    record = run_manager.get_run(run_id)
+    if record is None and not event_bus.get_history(run_id):
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    async def event_generator() -> AsyncIterator[str]:
+        async for event in event_bus.subscribe(run_id):
+            yield event.to_sse()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
+    "/{run_id}/trace",
+    response_model=RunTraceResponse,
+    summary="Get execution spans and cumulative resource cost totals",
+)
+async def get_run_trace(
+    run_id: str,
+    run_manager: Annotated[RunManager, Depends(get_run_manager)],
+) -> RunTraceResponse:
+    """Retrieve execution trace spans and resource consumption totals."""
+    record = run_manager.get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    spans_data = [
+        SpanResponse(
+            name=s.name,
+            id=str(s.id),
+            parent_id=str(s.parent_id) if s.parent_id else None,
+            start_time=s.start_time.isoformat(),
+            end_time=s.end_time.isoformat() if s.end_time else None,
+            latency_ms=s.latency_ms,
+            status=s.status,
+            error=s.error,
+            span_type=s.span_type,
+            tool_name=s.tool_name,
+            metadata=dict(s.metadata or {}),
+        )
+        for s in (record.tracer.spans if record.tracer else [])
+    ]
+
+    budget = record.budget_manager
+    total_tokens = budget.used_tokens if budget else 0
+    tokens_in = total_tokens // 2
+    tokens_out = total_tokens - tokens_in
+    tool_calls = budget.used_tool_calls if budget else 0
+
+    if (
+        isinstance(record.outcome, RunOutcome)
+        and record.outcome.state
+        and record.outcome.state.results
+    ):
+        ti = 0
+        to = 0
+        tc = 0
+        for res in record.outcome.state.results.values():
+            if isinstance(res, TaskResult) and res.usage:
+                ti += int(res.usage.get("tokens_in", 0))
+                to += int(res.usage.get("tokens_out", 0))
+                tc += int(res.usage.get("tool_calls", 0))
+        if ti > 0 or to > 0:
+            tokens_in = ti
+            tokens_out = to
+            total_tokens = ti + to
+        if tc > tool_calls:
+            tool_calls = tc
+
+    if record.tracer:
+        span_tool_count = sum(
+            1 for s in record.tracer.spans if s.span_type == "tool" or s.tool_name
+        )
+        if span_tool_count > tool_calls:
+            tool_calls = span_tool_count
+
+    cost_totals = CostTotalsResponse(
+        total_tokens=total_tokens,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        tool_calls=tool_calls,
+        elapsed_seconds=(budget.used_seconds if budget else 0.0),
+        estimated_cost_usd=(budget.used_cost if budget else 0.0),
+    )
+
+    return RunTraceResponse(
+        run_id=record.run_id,
+        spans=spans_data,
+        cost_totals=cost_totals,
+    )

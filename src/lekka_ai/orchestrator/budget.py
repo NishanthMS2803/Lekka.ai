@@ -47,6 +47,7 @@ class RunBudget(Budget):
     )
     tracer: Tracer | None = Field(
         default=None,
+        exclude=True,
         description="Tracer instance for recording allocation and reconciliation spans",
     )
 
