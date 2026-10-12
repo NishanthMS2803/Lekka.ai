@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from lekka_ai.tools.submit import SubmitAnswerTool
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from lekka_ai.db.ledger import LedgerRepository
     from lekka_ai.harness.models import AgentTask, Limits
     from lekka_ai.harness.permissions import AgentProfile, ToolView
     from lekka_ai.llm.base import LLMClient
@@ -72,13 +74,22 @@ class AgentRunResult(BaseModel):
         ge=0,
         description="Number of submit_answer validation repair attempts",
     )
+    stored_claims: list[Any] = Field(
+        default_factory=list,
+        description="Validated claims persisted into the ledger",
+    )
 
 
 class AgentRuntime:
     """Orchestrates single-agent inner loop execution with permissions and tracing."""
 
-    def __init__(self, session: Session | None = None) -> None:
+    def __init__(
+        self,
+        session: Session | None = None,
+        ledger: LedgerRepository | None = None,
+    ) -> None:
         self.session = session
+        self.ledger = ledger
 
     @classmethod
     async def run(
@@ -91,9 +102,10 @@ class AgentRuntime:
         *,
         max_repair_attempts: int = 3,
         session: Session | None = None,
+        ledger: LedgerRepository | None = None,
     ) -> AgentRunResult:
         """Execute an agent task through the runtime loop."""
-        runtime = cls(session=session)
+        runtime = cls(session=session, ledger=ledger)
         return await runtime.execute(
             task,
             profile,
@@ -155,7 +167,15 @@ class AgentRuntime:
         final_text: str | None = None
         status = "running"
         submitted_answer: SubmitAnswer | None = None
+        stored_claims: list[Any] = []
+        executed_tool_call_ids: set[str] = set()
+        tool_call_id_map: dict[str, uuid.UUID] = {}
         start_time = time.perf_counter()
+
+        # Seed any tool call IDs already linked to agent_run
+        if db_agent_run is not None and hasattr(db_agent_run, "tool_calls"):
+            for db_tc in db_agent_run.tool_calls:
+                executed_tool_call_ids.add(str(db_tc.id))
 
         logger.info(
             "Starting agent runtime loop",
@@ -214,6 +234,19 @@ class AgentRuntime:
                         else:
                             submission = SubmitAnswer.model_validate(tc.args)
 
+                        # Citation integrity & point-in-time date validation
+                        citation_errors = self._validate_citation_integrity(
+                            submission=submission,
+                            task=task,
+                            executed_tool_call_ids=executed_tool_call_ids,
+                        )
+                        if citation_errors:
+                            msg = (
+                                "Citation integrity verification failed:\n"
+                                + "\n".join(f"- {e}" for e in citation_errors)
+                            )
+                            raise ValueError(msg)
+
                         tool_output = await tool_view.execute(tc.name, submission)
                         formatted_output = wrap_tool_output(tc.name, tool_output)
                         messages.append(
@@ -222,6 +255,15 @@ class AgentRuntime:
                                 content=formatted_output,
                             )
                         )
+
+                        # Write valid claims to the ledger
+                        stored_claims = self._write_claims_to_ledger(
+                            submission=submission,
+                            task=task,
+                            db_agent_run=db_agent_run,
+                            tool_call_id_map=tool_call_id_map,
+                        )
+
                         submitted_answer = submission
                         status = (
                             submission.status.value
@@ -289,6 +331,15 @@ class AgentRuntime:
 
                 try:
                     tool_output = await tool_view.execute(tc.name, tc.args)
+                    executed_tool_call_ids.add(str(tc.id).strip())
+                    if tool_view.tracer.spans:
+                        latest_span = tool_view.tracer.spans[-1]
+                        executed_tool_call_ids.add(str(latest_span.id))
+                        if latest_span.tool_call_id:
+                            executed_tool_call_ids.add(str(latest_span.tool_call_id))
+                            tool_call_id_map[str(tc.id).strip()] = (
+                                latest_span.tool_call_id
+                            )
                 except Exception as exc:
                     logger.warning(
                         "Tool execution error in runtime",
@@ -358,7 +409,148 @@ class AgentRuntime:
             agent_run_id=run_id_str,
             submission=submitted_answer,
             repair_attempts=repair_attempts,
+            stored_claims=stored_claims,
         )
+
+    @staticmethod
+    def _parse_date(val: Any) -> date | None:
+        """Parse string, datetime, or date into datetime.date."""
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val.date()
+        if isinstance(val, date):
+            return val
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10])
+        except Exception:
+            return None
+
+    def _validate_citation_integrity(
+        self,
+        submission: SubmitAnswer,
+        task: AgentTask,
+        executed_tool_call_ids: set[str],
+    ) -> list[str]:
+        """Verify cited tool_call_ids were executed and dates obey task cutoff."""
+        errors: list[str] = []
+        task_date = self._parse_date(task.as_of_date) if task.as_of_date else None
+
+        for claim in submission.claims:
+            # Check claim-level as_of_date if specified
+            if hasattr(claim, "as_of_date") and getattr(claim, "as_of_date", None):
+                c_date = self._parse_date(claim.as_of_date)
+                if c_date and task_date and c_date > task_date:
+                    errors.append(
+                        f"Claim '{claim.claim_id}' cites as_of_date "
+                        f"'{claim.as_of_date}' exceeding task cutoff "
+                        f"'{task.as_of_date}'"
+                    )
+
+            # Check evidence citations
+            for ev in claim.evidence:
+                if ev.tool_call_id is not None:
+                    tid = str(ev.tool_call_id).strip()
+                    if tid and tid not in executed_tool_call_ids:
+                        errors.append(
+                            f"Claim '{claim.claim_id}' cites unexecuted or "
+                            f"invented tool_call_id '{ev.tool_call_id}'"
+                        )
+
+                if ev.as_of_date is not None and task_date is not None:
+                    ev_date = self._parse_date(ev.as_of_date)
+                    if ev_date and ev_date > task_date:
+                        errors.append(
+                            f"Claim '{claim.claim_id}' cites evidence as_of_date "
+                            f"'{ev.as_of_date}' exceeding task cutoff "
+                            f"'{task.as_of_date}'"
+                        )
+
+        return errors
+
+    def _write_claims_to_ledger(
+        self,
+        submission: SubmitAnswer,
+        task: AgentTask,
+        db_agent_run: Any,
+        tool_call_id_map: dict[str, uuid.UUID],
+    ) -> list[Any]:
+        """Persist valid submission claims and linked evidence into ledger storage."""
+        if not submission.claims:
+            return []
+
+        # Map string tool_call_ids to genuine DB tool_call UUIDs if available
+        claims_to_store: list[Any] = []
+        for claim in submission.claims:
+            updated_evidence = []
+            for ev in claim.evidence:
+                if ev.tool_call_id and str(ev.tool_call_id) in tool_call_id_map:
+                    resolved_uuid = tool_call_id_map[str(ev.tool_call_id)]
+                    updated_ev = ev.model_copy(
+                        update={"tool_call_id": str(resolved_uuid)}
+                    )
+                    updated_evidence.append(updated_ev)
+                else:
+                    updated_evidence.append(ev)
+            claims_to_store.append(
+                claim.model_copy(update={"evidence": updated_evidence})
+            )
+
+        if self.session is not None or self.ledger is not None:
+            from lekka_ai.db.ledger import LedgerRepository
+            from lekka_ai.db.models import Task
+            from lekka_ai.db.repository import create_run
+
+            ledger_repo = self.ledger or LedgerRepository(self.session)  # type: ignore[arg-type]
+
+            task_uuid = None
+            if db_agent_run is not None and hasattr(db_agent_run, "task_id"):
+                task_uuid = db_agent_run.task_id
+            else:
+                try:
+                    task_uuid = uuid.UUID(str(task.task_id))
+                except (ValueError, TypeError):
+                    task_uuid = None
+
+            if task_uuid is not None and self.session is not None:
+                db_task = self.session.query(Task).filter_by(id=task_uuid).first()
+                if db_task is None:
+                    task_uuid = None
+
+            run_uuid = None
+            if hasattr(task, "run_id") and getattr(task, "run_id", None):
+                try:
+                    run_uuid = uuid.UUID(str(task.run_id))
+                except (ValueError, TypeError):
+                    pass
+
+            if run_uuid is None and self.session is not None and task_uuid is not None:
+                db_task = self.session.query(Task).filter_by(id=task_uuid).first()
+                if db_task and db_task.run_id:
+                    run_uuid = db_task.run_id
+
+            if run_uuid is None and self.session is not None:
+                db_run = create_run(self.session, question=task.instruction)
+                run_uuid = db_run.id
+            elif run_uuid is None:
+                run_uuid = uuid4()
+
+            agent_run_uuid = db_agent_run.id if db_agent_run is not None else None
+
+            persisted = ledger_repo.add_claims(
+                claims_to_store,
+                run_id=run_uuid,
+                task_id=task_uuid,
+                agent_run_id=agent_run_uuid,
+            )
+            if self.session is not None:
+                self.session.commit()
+            return persisted
+
+        return claims_to_store
 
     def _build_initial_messages(
         self,

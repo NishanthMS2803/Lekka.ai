@@ -9,6 +9,7 @@ from sqlalchemy import text
 from lekka_ai.db import (
     create_run,
     create_task,
+    get_claims,
     get_engine,
     get_session,
 )
@@ -325,9 +326,21 @@ async def test_runtime_valid_submit_ends_loop(registry: ToolRegistry) -> None:
         agent_type="analyst",
         instruction="Calculate Apple FY2024 revenue.",
     )
-    profile = AgentProfile(agent_type="analyst")
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
     tracer = Tracer()
     tool_view = ToolView(registry, profile, tracer=tracer)
+
+    call_1 = LLMResponse(
+        text="Executing echo_tool to retrieve SEC filing data...",
+        tool_calls=[
+            ToolCall(
+                id="tc_echo_01",
+                name="echo_tool",
+                args={"message": "AAPL 10-K FY2024 Revenue $391.0B"},
+            )
+        ],
+        usage=Usage(input_tokens=15, output_tokens=10),
+    )
 
     submit_payload = {
         "task_id": "task_valid_sub_01",
@@ -352,7 +365,7 @@ async def test_runtime_valid_submit_ends_loop(registry: ToolRegistry) -> None:
         "confidence_rationale": "Directly grounded in SEC 10-K filing.",
     }
 
-    call = LLMResponse(
+    call_2 = LLMResponse(
         text="Submitting finalized grounded answer.",
         tool_calls=[
             ToolCall(
@@ -364,7 +377,7 @@ async def test_runtime_valid_submit_ends_loop(registry: ToolRegistry) -> None:
         usage=Usage(input_tokens=20, output_tokens=15),
     )
 
-    fake_llm = FakeLLM(responses=[call])
+    fake_llm = FakeLLM(responses=[call_1, call_2])
     result = await AgentRuntime.run(
         task=task,
         profile=profile,
@@ -374,16 +387,17 @@ async def test_runtime_valid_submit_ends_loop(registry: ToolRegistry) -> None:
     )
 
     assert result.status == "completed"
-    assert result.iterations == 1
-    assert result.tool_calls_count == 1
+    assert result.iterations == 2
+    assert result.tool_calls_count == 2
     assert result.repair_attempts == 0
     assert result.submission is not None
     assert result.submission.task_id == "task_valid_sub_01"
     assert result.submission.confidence == 0.98
     assert result.final_text == "Directly grounded in SEC 10-K filing."
     assert "Answer submission accepted and validated." in result.messages[-1].content
-    assert len(tracer.spans) == 1
+    assert len(tracer.spans) == 2
     assert tracer.spans[0].status == "ok"
+    assert tracer.spans[1].status == "ok"
 
 
 @pytest.mark.asyncio
@@ -396,11 +410,23 @@ async def test_runtime_invalid_submit_triggers_repair(
         agent_type="analyst",
         instruction="Determine Apple FY2024 revenue.",
     )
-    profile = AgentProfile(agent_type="analyst")
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
     tracer = Tracer()
     tool_view = ToolView(registry, profile, tracer=tracer)
 
-    # Turn 1: Invalid submission (status='completed' with 0 claims is rejected)
+    call_1 = LLMResponse(
+        text="Gathering data via echo_tool...",
+        tool_calls=[
+            ToolCall(
+                id="tc_step_01",
+                name="echo_tool",
+                args={"message": "AAPL revenue verified"},
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=8),
+    )
+
+    # Turn 2: Invalid submission (status='completed' with 0 claims is rejected)
     invalid_payload = {
         "task_id": "task_repair_01",
         "agent_type": "analyst",
@@ -409,7 +435,7 @@ async def test_runtime_invalid_submit_triggers_repair(
         "confidence": 0.9,
         "confidence_rationale": "Premature submission without grounded claims.",
     }
-    call_1 = LLMResponse(
+    call_2 = LLMResponse(
         text="Submitting answer...",
         tool_calls=[
             ToolCall(id="tc_sub_inv", name="submit_answer", args=invalid_payload)
@@ -417,7 +443,7 @@ async def test_runtime_invalid_submit_triggers_repair(
         usage=Usage(input_tokens=15, output_tokens=10),
     )
 
-    # Turn 2: Repaired submission with grounded claim
+    # Turn 3: Repaired submission with grounded claim
     valid_payload = {
         "task_id": "task_repair_01",
         "agent_type": "analyst",
@@ -439,7 +465,7 @@ async def test_runtime_invalid_submit_triggers_repair(
         "confidence": 0.95,
         "confidence_rationale": "Repaired submission with verified SEC evidence.",
     }
-    call_2 = LLMResponse(
+    call_3 = LLMResponse(
         text="Repairing submission with required evidence claim.",
         tool_calls=[
             ToolCall(id="tc_sub_valid", name="submit_answer", args=valid_payload)
@@ -447,7 +473,7 @@ async def test_runtime_invalid_submit_triggers_repair(
         usage=Usage(input_tokens=30, output_tokens=20),
     )
 
-    fake_llm = FakeLLM(responses=[call_1, call_2])
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3])
     result = await AgentRuntime.run(
         task=task,
         profile=profile,
@@ -457,22 +483,22 @@ async def test_runtime_invalid_submit_triggers_repair(
     )
 
     assert result.status == "completed"
-    assert result.iterations == 2
+    assert result.iterations == 3
     assert result.repair_attempts == 1
     assert result.submission is not None
     assert result.submission.confidence == 0.95
 
-    # Check observation returned to agent in message 2
-    assert result.messages[2].role == "tool"
-    assert "Validation failed for submit_answer (1/3)" in result.messages[2].content
+    # Check observation returned to agent in message 4
+    assert result.messages[4].role == "tool"
+    assert "Validation failed for submit_answer (1/3)" in result.messages[4].content
     assert (
         "Completed answers require at least one grounded Claim"
-        in result.messages[2].content
+        in result.messages[4].content
     )
 
-    # Check accepted submission in message 4
-    assert result.messages[4].role == "tool"
-    assert "Answer submission accepted and validated." in result.messages[4].content
+    # Check accepted submission in message 6
+    assert result.messages[6].role == "tool"
+    assert "Answer submission accepted and validated." in result.messages[6].content
 
 
 @pytest.mark.asyncio
@@ -552,3 +578,320 @@ async def test_runtime_three_failures_end_gracefully(
         "Maximum repair attempts exceeded. Ending task." in result.messages[-1].content
     )
     assert tracer.spans[-1].status == "error"
+
+
+@pytest.mark.asyncio
+async def test_runtime_citation_integrity_invented_tool_call_id_rejected(
+    registry: ToolRegistry,
+) -> None:
+    """Claims citing invented tool_call_id are rejected back to agent for repair."""
+    task = AgentTask(
+        task_id="task_invented_id_01",
+        agent_type="analyst",
+        instruction="Verify Apple revenue figures.",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tracer = Tracer()
+    tool_view = ToolView(registry, profile, tracer=tracer)
+
+    # Turn 1: legitimate tool execution
+    call_1 = LLMResponse(
+        text="Executing echo_tool for SEC data...",
+        tool_calls=[
+            ToolCall(
+                id="tc_legit_01",
+                name="echo_tool",
+                args={"message": "AAPL 10-K reported $391.0B"},
+            )
+        ],
+        usage=Usage(input_tokens=15, output_tokens=10),
+    )
+
+    # Turn 2: Agent attempts to cite an invented tool call ID
+    invented_payload = {
+        "task_id": "task_invented_id_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_bad_01",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.95,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "tool_call_id": "tc_fake_invented_999",
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.95,
+        "confidence_rationale": "Citing fabricated tool call.",
+    }
+    call_2 = LLMResponse(
+        text="Submitting answer with invented citation...",
+        tool_calls=[
+            ToolCall(id="tc_sub_01", name="submit_answer", args=invented_payload)
+        ],
+        usage=Usage(input_tokens=25, output_tokens=15),
+    )
+
+    # Turn 3: Agent repairs citation by pointing to genuine executed tool_call_id
+    repaired_payload = {
+        "task_id": "task_invented_id_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_good_01",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.95,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "tool_call_id": "tc_legit_01",
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.95,
+        "confidence_rationale": "Repaired with valid executed tool call.",
+    }
+    call_3 = LLMResponse(
+        text="Repairing submission with real citation.",
+        tool_calls=[
+            ToolCall(id="tc_sub_02", name="submit_answer", args=repaired_payload)
+        ],
+        usage=Usage(input_tokens=30, output_tokens=20),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=5),
+    )
+
+    assert result.status == "completed"
+    assert result.iterations == 3
+    assert result.repair_attempts == 1
+    assert result.submission is not None
+    assert len(result.stored_claims) == 1
+
+    # Check rejection observation in message 4
+    assert result.messages[4].role == "tool"
+    assert "Citation integrity verification failed" in result.messages[4].content
+    assert "tc_fake_invented_999" in result.messages[4].content
+
+
+@pytest.mark.asyncio
+async def test_runtime_citation_integrity_as_of_date_exceeded_rejected(
+    registry: ToolRegistry,
+) -> None:
+    """Claims citing as_of_date exceeding task cutoff date are rejected for repair."""
+    task = AgentTask(
+        task_id="task_pit_01",
+        agent_type="analyst",
+        instruction="Evaluate Apple performance up to FY2024 cutoff.",
+        as_of_date="2024-09-30",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tracer = Tracer()
+    tool_view = ToolView(registry, profile, tracer=tracer)
+
+    # Turn 1: tool execution
+    call_1 = LLMResponse(
+        text="Looking up data...",
+        tool_calls=[
+            ToolCall(
+                id="tc_pit_01",
+                name="echo_tool",
+                args={"message": "AAPL 10-K filing data"},
+            )
+        ],
+        usage=Usage(input_tokens=15, output_tokens=10),
+    )
+
+    # Turn 2: Submission citing future date after cutoff
+    future_payload = {
+        "task_id": "task_pit_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_future_01",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.95,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "tool_call_id": "tc_pit_01",
+                        "as_of_date": "2024-10-15",  # Exceeds 2024-09-30 cutoff
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.95,
+        "confidence_rationale": "Citing post-cutoff date.",
+    }
+    call_2 = LLMResponse(
+        text="Submitting answer...",
+        tool_calls=[
+            ToolCall(id="tc_sub_01", name="submit_answer", args=future_payload)
+        ],
+        usage=Usage(input_tokens=25, output_tokens=15),
+    )
+
+    # Turn 3: Repaired submission respecting cutoff date
+    valid_payload = {
+        "task_id": "task_pit_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_pit_valid",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.95,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "tool_call_id": "tc_pit_01",
+                        "as_of_date": "2024-09-30",
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.95,
+        "confidence_rationale": "Repaired to respect cutoff.",
+    }
+    call_3 = LLMResponse(
+        text="Repairing submission with cutoff date.",
+        tool_calls=[ToolCall(id="tc_sub_02", name="submit_answer", args=valid_payload)],
+        usage=Usage(input_tokens=30, output_tokens=20),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=5),
+    )
+
+    assert result.status == "completed"
+    assert result.iterations == 3
+    assert result.repair_attempts == 1
+    assert result.submission is not None
+
+    # Check rejection observation in message 4
+    assert result.messages[4].role == "tool"
+    assert "exceeding task cutoff '2024-09-30'" in result.messages[4].content
+
+
+@pytest.mark.asyncio
+async def test_runtime_valid_claims_stored_in_ledger(
+    registry: ToolRegistry,
+) -> None:
+    """Valid claims from submit_answer are persisted to database ledger."""
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        pytest.skip("Database is not reachable")
+
+    session_generator = get_session()
+    session = next(session_generator)
+    try:
+        run = create_run(session, question="Test ledger claim persistence")
+        db_task = create_task(
+            session,
+            run_id=run.id,
+            agent_type="analyst",
+            instruction="Record grounded claim in ledger",
+        )
+
+        task = AgentTask(
+            task_id=str(db_task.id),
+            agent_type="analyst",
+            instruction="Record grounded claim in ledger",
+        )
+        profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+        tool_view = ToolView(registry, profile)
+
+        call_1 = LLMResponse(
+            text="Querying tool...",
+            tool_calls=[
+                ToolCall(
+                    id="tc_db_01",
+                    name="echo_tool",
+                    args={"message": "AAPL FY2024 SEC revenue verified"},
+                )
+            ],
+            usage=Usage(input_tokens=15, output_tokens=10),
+        )
+
+        submit_payload = {
+            "task_id": str(db_task.id),
+            "agent_type": "analyst",
+            "status": "completed",
+            "claims": [
+                {
+                    "claim_id": f"claim_db_{uuid4().hex[:8]}",
+                    "text": "Apple FY2024 revenue was $391.0B.",
+                    "type": "fact",
+                    "confidence": 0.98,
+                    "evidence": [
+                        {
+                            "source_type": "sec_filing",
+                            "document_id": "0000320193-24-000106",
+                            "tool_call_id": "tc_db_01",
+                        }
+                    ],
+                }
+            ],
+            "confidence": 0.98,
+            "confidence_rationale": "Directly grounded in SEC 10-K filing.",
+        }
+
+        call_2 = LLMResponse(
+            text="Submitting answer to store in ledger...",
+            tool_calls=[
+                ToolCall(id="tc_sub_01", name="submit_answer", args=submit_payload)
+            ],
+            usage=Usage(input_tokens=25, output_tokens=15),
+        )
+
+        fake_llm = FakeLLM(responses=[call_1, call_2])
+        result = await AgentRuntime.run(
+            task=task,
+            profile=profile,
+            llm=fake_llm,
+            tool_view=tool_view,
+            limits=Limits(max_iterations=5),
+            session=session,
+        )
+
+        assert result.status == "completed"
+        assert result.submission is not None
+        assert len(result.stored_claims) == 1
+
+        # Query database directly using get_claims repository function
+        persisted_claims = get_claims(session, run_id=run.id)
+        assert len(persisted_claims) == 1
+        assert persisted_claims[0].text == "Apple FY2024 revenue was $391.0B."
+        assert len(persisted_claims[0].evidence) == 1
+        assert persisted_claims[0].evidence[0].source_type == "sec_filing"
+        assert persisted_claims[0].evidence[0].tool_call_id is not None
+    finally:
+        try:
+            next(session_generator)
+        except StopIteration:
+            pass
