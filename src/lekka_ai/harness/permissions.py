@@ -164,6 +164,7 @@ class ToolView:
         agent_run_id: uuid.UUID | None = None,
         max_retries: int = 2,
         backoff_factor: float = 0.05,
+        fault_plan: Any | None = None,
     ) -> None:
         self.registry = registry
         if isinstance(profile, AgentProfile):
@@ -177,6 +178,7 @@ class ToolView:
         self.agent_run_id = agent_run_id
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
+        self.fault_plan = fault_plan
 
     def is_allowed(self, tool_name: str) -> bool:
         """Verify if a tool is permitted under current agent profile."""
@@ -251,6 +253,12 @@ class ToolView:
                 raise PermissionDenied(msg)
 
         tool = self.registry.get(clean_name)
+        effective_fault_plan = self.fault_plan
+        if effective_fault_plan is None:
+            from lekka_ai.harness.faults import get_current_fault_plan
+
+            effective_fault_plan = get_current_fault_plan()
+
         async with self.tracer.span(
             clean_name,
             span_type="tool",
@@ -261,10 +269,20 @@ class ToolView:
             last_exc: Exception | None = None
             for attempt in range(self.max_retries + 1):
                 try:
-                    if hasattr(tool, "execute"):
-                        result = await tool.execute(input_data)
+
+                    async def _run_tool() -> Any:
+                        if hasattr(tool, "execute"):
+                            return await tool.execute(input_data)
+                        return await tool(input_data)
+
+                    if (
+                        effective_fault_plan is not None
+                        and effective_fault_plan.should_inject(clean_name)
+                    ):
+                        result = await effective_fault_plan.apply(clean_name, _run_tool)
                     else:
-                        result = await tool(input_data)
+                        result = await _run_tool()
+
                     span_obj.output_json = (
                         result.model_dump()
                         if hasattr(result, "model_dump")

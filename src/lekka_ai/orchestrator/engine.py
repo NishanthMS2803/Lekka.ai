@@ -143,6 +143,7 @@ class OrchestrationEngine:
         tracer: Tracer | None = None,
         event_bus: Any | None = None,
         run_id: str | None = None,
+        fault_plan: Any | None = None,
     ) -> None:
         """Initialize OrchestrationEngine with configuration and dependencies."""
         if max_rounds < 1:
@@ -164,6 +165,7 @@ class OrchestrationEngine:
         self.tracer = tracer
         self.event_bus = event_bus
         self.run_id = run_id
+        self.fault_plan = fault_plan
 
     async def run(
         self,
@@ -296,6 +298,7 @@ class OrchestrationEngine:
                 ledger=self.ledger,
                 session=self.session,
                 tracer=self.tracer,
+                fault_plan=self.fault_plan,
             )
 
         raw_runner = self.task_runner or _default_dispatch_runner
@@ -590,6 +593,7 @@ async def run_engine(
     available_profiles: dict[str, AgentProfile] | Iterable[str] | None = None,
     event_bus: Any | None = None,
     run_id: str | None = None,
+    fault_plan: Any | None = None,
 ) -> RunOutcome:
     """Run the complete multi-wave orchestration engine loop.
 
@@ -612,6 +616,7 @@ async def run_engine(
         tracer=tracer,
         event_bus=event_bus,
         run_id=run_id,
+        fault_plan=fault_plan,
     )
     return await engine.run(
         question=question,

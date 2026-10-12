@@ -26,6 +26,14 @@ class CreateRunRequest(BaseModel):
         default=None,
         description="Optional budget limits (max_tokens, max_cost_usd, etc.)",
     )
+    config: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional run-level configuration (e.g. fault_plan)",
+    )
+    fault_plan: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional chaos fault injection plan (disabled in production)",
+    )
 
 
 class RunCreateResponse(BaseModel):

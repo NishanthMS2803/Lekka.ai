@@ -151,6 +151,7 @@ async def run_task(
     session: Session | None = None,
     tracer: Tracer | None = None,
     max_repair_attempts: int = 3,
+    fault_plan: Any | None = None,
 ) -> TaskResult:
     """Execute a single planned task through the runtime, budget, and ledger glue.
 
@@ -206,7 +207,13 @@ async def run_task(
 
     # 3. Create ToolView
     reg = tool_registry or default_registry
-    tool_view = ToolView(registry=reg, profile=profile, tracer=tracer)
+    effective_fault_plan = fault_plan or getattr(state, "fault_plan", None)
+    tool_view = ToolView(
+        registry=reg,
+        profile=profile,
+        tracer=tracer,
+        fault_plan=effective_fault_plan,
+    )
 
     # 4. Allocate Limits from budget
     limits = effective_budget.allocate(planned_task)

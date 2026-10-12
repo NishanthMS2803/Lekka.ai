@@ -51,6 +51,8 @@ class RunRecord:
     claims: list[Claim] = field(default_factory=list)
     tracer: Tracer | None = None
     budget_manager: RunBudget | None = None
+    fault_plan: Any | None = None
+    config: dict[str, Any] | None = None
     error: str | None = None
     completed_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -70,6 +72,8 @@ class RunManager:
         question: str,
         as_of_date: str | date | None = None,
         budget: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        fault_plan: Any | None = None,
     ) -> RunRecord:
         """Create and register a new pending run record."""
         as_of_str = str(as_of_date) if as_of_date is not None else None
@@ -78,6 +82,8 @@ class RunManager:
             question=question,
             as_of_date=as_of_str,
             budget=budget,
+            config=config,
+            fault_plan=fault_plan,
         )
         self._runs[run_id] = record
         return record
@@ -169,6 +175,21 @@ class RunManager:
             },
         )
 
+        # Resolve fault plan if provided
+        active_fault_plan = record.fault_plan
+        if (
+            active_fault_plan is None
+            and record.config
+            and isinstance(record.config, dict)
+        ):
+            active_fault_plan = record.config.get("fault_plan")
+        if (
+            active_fault_plan is None
+            and record.budget
+            and isinstance(record.budget, dict)
+        ):
+            active_fault_plan = record.budget.get("fault_plan")
+
         ledger = LedgerRepository(session) if session is not None else None
         try:
             outcome = await run_engine(
@@ -183,6 +204,7 @@ class RunManager:
                 available_profiles=available_profiles,
                 event_bus=self.event_bus,
                 run_id=run_id,
+                fault_plan=active_fault_plan,
             )
 
             # Collect claims from all completed tasks

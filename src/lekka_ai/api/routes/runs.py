@@ -69,6 +69,8 @@ async def create_run(
         question=request.question,
         as_of_date=request.as_of_date,
         budget=request.budget,
+        config=request.config,
+        fault_plan=request.fault_plan,
     )
 
     background_tasks.add_task(
