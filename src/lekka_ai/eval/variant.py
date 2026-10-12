@@ -44,6 +44,26 @@ class RunResult(BaseModel):
         default_factory=dict,
         description="Pluggable evaluation metric scores",
     )
+    status: str = Field(
+        default="completed",
+        description="Execution status (e.g. 'completed', 'abstained', 'failed')",
+    )
+    is_abstention: bool = Field(
+        default=False,
+        description="Whether the run resulted in an explicit abstention",
+    )
+    recovered: bool = Field(
+        default=False,
+        description="Whether the run successfully recovered from an error or fault",
+    )
+    confidence_score: float | None = Field(
+        default=None,
+        description="Overall confidence score for the report/findings",
+    )
+    missing_evidence: list[str] = Field(
+        default_factory=list,
+        description="List of stated missing evidence items",
+    )
     error: str | None = Field(default=None, description="Error message if run failed")
     raw: Any = Field(default=None, description="Underlying result payload")
 

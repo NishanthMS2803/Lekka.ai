@@ -506,6 +506,7 @@ async def synthesize_report(
     *,
     ticker: str | None = None,
     question: str | None = None,
+    llm: LLMClient | None = None,
     llm_client: LLMClient | None = None,
     model_name: str | None = None,
     max_retries: int = 2,
@@ -518,6 +519,7 @@ async def synthesize_report(
         claims: Verified ledger claims to ground the report.
         ticker: Optional target stock ticker symbol.
         question: Optional research question or mandate.
+        llm: LLM client alias.
         llm_client: LLM client (GeminiClient or FakeLLM).
         model_name: Specific Gemini model identifier.
         max_retries: Maximum number of regeneration attempts (default 2).
@@ -525,7 +527,8 @@ async def synthesize_report(
         require_all_sections: Enforce all 9 required markdown sections.
     """
     settings = get_settings()
-    client = llm_client or GeminiClient(model=model_name or settings.GEMINI_MODEL)
+    effective_llm = llm_client or llm
+    client = effective_llm or GeminiClient(model=model_name or settings.GEMINI_MODEL)
 
     claims_text = _format_claims_for_prompt(claims)
     mandate_str = question or "Comprehensive Equity Research Analysis"

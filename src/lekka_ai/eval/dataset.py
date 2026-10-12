@@ -46,6 +46,15 @@ class EvalExample(BaseModel):
             "dict with tolerance, or text)"
         ),
     )
+    expected_behavior: str | None = Field(
+        default=None, description="Expected recovery or abstention behavior"
+    )
+    expected_abstain: bool | None = Field(
+        default=None, description="Whether the run is expected to abstain"
+    )
+    scenario: str | None = Field(
+        default=None, description="Failure suite scenario identifier"
+    )
     tags: list[str] = Field(
         default_factory=list,
         description="Descriptive tags (e.g. ['market_data', '10-k', 'ratios'])",

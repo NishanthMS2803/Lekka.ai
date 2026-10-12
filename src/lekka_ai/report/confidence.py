@@ -123,6 +123,7 @@ def calculate_confidence(
     anchor_date: date | str | None = None,
     limits_hit: Sequence[str | dict[str, Any]] | None = None,
     open_questions: Sequence[str] | None = None,
+    unresolved_conflicts: int | None = None,
 ) -> ConfidenceBreakdown:
     """Compute deterministic confidence score based on the 6 stated methodology rules.
 
@@ -249,6 +250,8 @@ def calculate_confidence(
     # 2. Number of unresolved conflicts
     # Count contradicted claims + conflict questions in open_questions
     conflicts_count = len(contradicted_claim_ids)
+    if unresolved_conflicts is not None:
+        conflicts_count += max(0, unresolved_conflicts)
     all_open_questions: list[str] = []
     if open_questions:
         all_open_questions.extend(open_questions)
@@ -515,3 +518,7 @@ async def synthesize_report_with_confidence(
         max_retries=max_retries,
     )
     return report, breakdown
+
+
+# Alias for backward compatibility and test suites
+calculate_confidence_score = calculate_confidence
