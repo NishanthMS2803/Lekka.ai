@@ -9,6 +9,12 @@ from lekka_ai.orchestrator.dispatch import (
     get_relevant_context_facts,
     run_task,
 )
+from lekka_ai.orchestrator.engine import (
+    OrchestrationEngine,
+    RunOutcome,
+    run_engine,
+    run_orchestrator,
+)
 from lekka_ai.orchestrator.gapcheck import (
     Decision,
     FollowUpTaskSpec,
@@ -58,6 +64,7 @@ __all__ = [
     "GapCheckAction",
     "GenericInstructionError",
     "InvalidDependencyError",
+    "OrchestrationEngine",
     "ParsedQuery",
     "Plan",
     "PlanSpec",
@@ -66,6 +73,7 @@ __all__ = [
     "PlannedTaskSpec",
     "QueryIntent",
     "RunBudget",
+    "RunOutcome",
     "RunState",
     "TaskResult",
     "UnknownAgentTypeError",
@@ -81,7 +89,9 @@ __all__ = [
     "persist_task_status",
     "plan_query",
     "ready_tasks",
+    "run_engine",
     "run_gap_check",
+    "run_orchestrator",
     "run_task",
     "topological_sort",
     "understand_query",
