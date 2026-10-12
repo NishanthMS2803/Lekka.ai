@@ -19,6 +19,11 @@ from lekka_ai.harness.permissions import (
     PermissionDenied,
     ToolView,
 )
+from lekka_ai.harness.profiles import (
+    ANALYST_PROFILE,
+    create_analyst_profile,
+    get_analyst_tools,
+)
 from lekka_ai.harness.runtime import (
     AgentRunResult,
     AgentRuntime,
@@ -34,6 +39,7 @@ from lekka_ai.harness.untrusted import (
 )
 
 __all__ = [
+    "ANALYST_PROFILE",
     "UNTRUSTED_DATA_PROMPT_SNIPPET",
     "UNTRUSTED_DATA_SYSTEM_PROMPT",
     "UNTRUSTED_TAG",
@@ -50,9 +56,11 @@ __all__ = [
     "ToolError",
     "ToolView",
     "canonicalize_tool_args",
+    "create_analyst_profile",
     "escape_untrusted_content",
     "extract_untrusted_blocks",
     "format_tool_error",
+    "get_analyst_tools",
     "is_retryable_tool_error",
     "wrap_tool_output",
     "wrap_untrusted_content",

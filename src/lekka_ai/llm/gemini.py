@@ -1,5 +1,6 @@
 """Gemini LLM provider using google-genai SDK with function calling and retries."""
 
+import copy
 from typing import Any
 
 from google import genai
@@ -115,6 +116,34 @@ async def embed_texts(
     return all_embeddings
 
 
+def _resolve_schema_refs(schema_dict: dict[str, Any]) -> dict[str, Any]:
+    """Recursively resolve $defs and inline $ref fields for Gemini Schema validation."""
+    schema = copy.deepcopy(schema_dict)
+    defs = schema.pop("$defs", {})
+
+    def _resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_key = str(node["$ref"]).split("/")[-1]
+                if ref_key in defs:
+                    resolved = _resolve(copy.deepcopy(defs[ref_key]))
+                    extra = {k: _resolve(v) for k, v in node.items() if k != "$ref"}
+                    if isinstance(resolved, dict):
+                        resolved.update(extra)
+                    return resolved
+            return {
+                k: _resolve(v)
+                for k, v in node.items()
+                if k not in ("additionalProperties", "$defs")
+            }
+        elif isinstance(node, list):
+            return [_resolve(item) for item in node]
+        return node
+
+    result = _resolve(schema)
+    return result if isinstance(result, dict) else schema
+
+
 class GeminiClient(LLMClient):
     """Client for generating completions using Google Gemini models."""
 
@@ -145,13 +174,17 @@ class GeminiClient(LLMClient):
             if msg.role == "system":
                 system_parts.append(msg.content)
             else:
-                role = "user" if msg.role == "user" else "model"
-                contents.append(
-                    types.Content(
-                        role=role,
-                        parts=[types.Part.from_text(text=msg.content)],
+                role = "user" if msg.role in ("user", "tool") else "model"
+                part = types.Part.from_text(text=msg.content or " ")
+                if contents and contents[-1].role == role and contents[-1].parts:
+                    contents[-1].parts.append(part)
+                else:
+                    contents.append(
+                        types.Content(
+                            role=role,
+                            parts=[part],
+                        )
                     )
-                )
 
         config_kwargs: dict[str, Any] = {}
         if system_parts:
@@ -162,7 +195,9 @@ class GeminiClient(LLMClient):
                 types.FunctionDeclaration(
                     name=tool.name,
                     description=tool.description,
-                    parameters=types.Schema.model_validate(tool.json_schema),
+                    parameters=types.Schema.model_validate(
+                        _resolve_schema_refs(tool.json_schema)
+                    ),
                 )
                 for tool in tools
             ]

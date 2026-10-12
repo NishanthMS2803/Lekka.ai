@@ -258,7 +258,17 @@ class AgentRuntime:
                         if isinstance(tc.args, SubmitAnswer):
                             submission = tc.args
                         else:
-                            submission = SubmitAnswer.model_validate(tc.args)
+                            raw_args = (
+                                dict(tc.args) if isinstance(tc.args, dict) else {}
+                            )
+                            if "task_id" not in raw_args or not raw_args["task_id"]:
+                                raw_args["task_id"] = task.task_id
+                            if (
+                                "agent_type" not in raw_args
+                                or not raw_args["agent_type"]
+                            ):
+                                raw_args["agent_type"] = profile.agent_type
+                            submission = SubmitAnswer.model_validate(raw_args)
 
                         # Citation integrity & point-in-time date validation
                         citation_errors = self._validate_citation_integrity(
@@ -423,7 +433,11 @@ class AgentRuntime:
                     }
 
                 # Delimit and wrap external tool outputs
-                formatted_output = wrap_tool_output(tc.name, tool_output)
+                formatted_output = wrap_tool_output(
+                    tc.name,
+                    tool_output,
+                    tool_call_id=str(tc.id).strip(),
+                )
                 messages.append(
                     Message(
                         role="tool",
@@ -829,6 +843,7 @@ class AgentRuntime:
                 f"You are a specialized financial {profile.agent_type} agent."
             )
 
+        system_parts.append(f"Task ID for submissions: {task.task_id}")
         system_parts.append(UNTRUSTED_DATA_SYSTEM_PROMPT)
 
         if task.as_of_date:

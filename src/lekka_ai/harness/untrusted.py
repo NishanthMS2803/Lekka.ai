@@ -105,7 +105,8 @@ def wrap_tool_output(
     tool_name: str,
     output: Any,
     source: str | None = None,
+    **metadata: Any,
 ) -> str:
     """Format and wrap external tool output if tool returns untrusted text."""
     inferred_source = source or UNTRUSTED_TOOL_SOURCES.get(tool_name, "external_tool")
-    return wrap_untrusted_content(output, source=inferred_source)
+    return wrap_untrusted_content(output, source=inferred_source, **metadata)

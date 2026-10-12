@@ -57,6 +57,14 @@ class AgentProfile(BaseModel):
         path = Path(self.system_prompt_path)
         if path.is_file():
             return path.read_text(encoding="utf-8")
+        pkg_root = Path(__file__).resolve().parent.parent
+        candidate = pkg_root / self.system_prompt_path
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+        repo_root = pkg_root.parent.parent
+        candidate = repo_root / self.system_prompt_path
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
         return None
 
 
