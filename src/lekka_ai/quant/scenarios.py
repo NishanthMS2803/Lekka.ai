@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -118,7 +119,7 @@ def _resolve_scenario_dcf(scenario: ScenarioAssumption) -> DCFResult:
 
 
 def scenario_table(
-    scenarios: list[ScenarioAssumption | dict[str, Any]] | None = None,
+    scenarios: Sequence[ScenarioAssumption | dict[str, Any]] | None = None,
     *,
     bear: ScenarioAssumption | dict[str, Any] | None = None,
     base: ScenarioAssumption | dict[str, Any] | None = None,
