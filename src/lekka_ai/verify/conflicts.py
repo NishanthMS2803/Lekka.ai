@@ -479,3 +479,6 @@ def detect_conflicts(
                             state.open_questions.append(question)
 
     return conflicts
+
+
+extract_claim_metric_and_value = _extract_metric_and_value

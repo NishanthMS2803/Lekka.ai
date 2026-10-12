@@ -28,6 +28,7 @@ from lekka_ai.tools.quant import (
     RunReverseDCFTool,
     ScenarioTableTool,
 )
+from lekka_ai.tools.recall_facts import RecallFactsTool
 from lekka_ai.tools.risk import ComputeRiskStatsTool
 from lekka_ai.tools.search_filings import (
     Citation,
@@ -177,5 +178,6 @@ def fixture_tool_registry(
     registry.register(RunPythonTool())
     registry.register(EchoTool())
     registry.register(SubmitAnswerTool())
+    registry.register(RecallFactsTool())
 
     return registry

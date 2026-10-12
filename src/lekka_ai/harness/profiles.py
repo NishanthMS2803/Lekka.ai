@@ -216,6 +216,7 @@ ANALYST_PROFILE: AgentProfile = create_analyst_profile()
 DEFAULT_MARKET_TOOLS: list[str] = [
     "get_market_data",
     "compute_risk_stats",
+    "recall_facts",
     "submit_answer",
 ]
 
@@ -252,6 +253,7 @@ DEFAULT_VALUATION_TOOLS: list[str] = [
     "compute_multiples",
     "scenario_table",
     "run_python",
+    "recall_facts",
     "submit_answer",
 ]
 
@@ -283,6 +285,7 @@ DEFAULT_NEWS_TOOLS: list[str] = [
     "get_news",
     "list_filings",
     "search_filings",
+    "recall_facts",
     "submit_answer",
 ]
 
@@ -316,6 +319,7 @@ DEFAULT_FUNDAMENTAL_TOOLS: list[str] = [
     "search_filings",
     "get_analyst_estimates",
     "get_industry_data",
+    "recall_facts",
     "submit_answer",
 ]
 
