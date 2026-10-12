@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval eval-all validate-datasets
+.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval eval-all validate-datasets frontend-dev frontend-build frontend-lint frontend-typecheck
 
 TICKER ?= AAPL
 VARIANTS ?= direct,single
@@ -41,4 +41,16 @@ eval-all:
 
 validate-datasets:
 	uv run python -m lekka_ai.eval.validate
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build
+
+frontend-lint:
+	cd frontend && npm run lint
+
+frontend-typecheck:
+	cd frontend && npm run typecheck
 

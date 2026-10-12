@@ -34,7 +34,13 @@ def create_app(cors_origins: list[str] | None = None) -> FastAPI:
     )
 
     # Configure CORS
-    origins = cors_origins if cors_origins is not None else ["http://localhost:3000"]
+    default_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
+    origins = cors_origins if cors_origins is not None else default_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
