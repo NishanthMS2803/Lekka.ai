@@ -296,6 +296,15 @@ def ask(
         if hasattr(ext, "implied_growth") and ext.implied_growth is not None:
             pct_str = f"{ext.implied_growth * 100:.2f}%"
             console.print(f"  • [bold]Implied Growth (Reverse DCF):[/bold] {pct_str}")
+        if hasattr(ext, "catalysts") and ext.catalysts:
+            console.print("  • [bold]Catalysts:[/bold]")
+            for c in ext.catalysts:
+                cat_dict = c.model_dump() if hasattr(c, "model_dump") else c
+                c_date = cat_dict.get("date", "N/A")
+                c_head = cat_dict.get("headline", "")
+                c_imp = str(cat_dict.get("impact", "")).upper()
+                c_nov = cat_dict.get("novelty", "")
+                console.print(f"      - [{c_date}] [{c_imp}] {c_head} ({c_nov})")
 
     # Claims table
     if submission and submission.claims:

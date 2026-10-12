@@ -2,6 +2,12 @@
 
 from lekka_ai.schemas.claims import Claim, ClaimType, Evidence
 from lekka_ai.schemas.market import MarketAnswerExtension
+from lekka_ai.schemas.news import (
+    CatalystImpact,
+    CatalystItem,
+    CatalystNovelty,
+    NewsAnswerExtension,
+)
 from lekka_ai.schemas.submit import (
     AnswerExtension,
     AnswerStatus,
@@ -19,10 +25,14 @@ from lekka_ai.schemas.valuation import (
 __all__ = [
     "AnswerExtension",
     "AnswerStatus",
+    "CatalystImpact",
+    "CatalystItem",
+    "CatalystNovelty",
     "Claim",
     "ClaimType",
     "Evidence",
     "MarketAnswerExtension",
+    "NewsAnswerExtension",
     "ScenarioValues",
     "SubmitAnswer",
     "ValuationAnswerExtension",

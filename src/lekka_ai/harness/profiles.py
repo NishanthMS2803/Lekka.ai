@@ -278,3 +278,34 @@ def create_valuation_profile(
 
 
 VALUATION_PROFILE: AgentProfile = create_valuation_profile()
+
+DEFAULT_NEWS_TOOLS: list[str] = [
+    "get_news",
+    "list_filings",
+    "search_filings",
+    "submit_answer",
+]
+
+
+def create_news_profile(
+    registry: ToolRegistry | None = None,
+    system_prompt_path: str | Path | None = None,
+) -> AgentProfile:
+    """Create or load the standard 'news' AgentProfile."""
+    try:
+        return load_agent_profile("news", registry=registry)
+    except Exception:
+        news_prompt_cand = (
+            Path(system_prompt_path)
+            if system_prompt_path
+            else Path("agents/prompts/news.md")
+        )
+        return AgentProfile(
+            agent_type="news",
+            allowed_tools=list(DEFAULT_NEWS_TOOLS),
+            system_prompt_path=str(news_prompt_cand),
+            answer_extension_schema="lekka_ai.schemas.news:NewsAnswerExtension",
+        )
+
+
+NEWS_PROFILE: AgentProfile = create_news_profile()
