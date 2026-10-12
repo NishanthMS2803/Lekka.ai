@@ -21,7 +21,7 @@ from lekka_ai.tools.base import ToolRegistry
 from lekka_ai.tools.echo import EchoTool
 from lekka_ai.tools.python_sandbox import RunPythonTool
 
-runner = CliRunner()
+runner = CliRunner(env={"COLUMNS": "160"})
 
 
 def test_analyst_profile_tools() -> None:

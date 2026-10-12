@@ -291,7 +291,8 @@ class BaseEngineVariant(Variant):
         # 1. Verifier ablation check
         if self.config.verifier and claims:
             try:
-                verdicts = await verify_claim_support(claims, llm=self.llm)
+                v_llm = getattr(self, "verifier_llm", None) or self.llm
+                verdicts = await verify_claim_support(claims, llm=v_llm)
             except Exception as err:
                 logger.warning("Claim verification failed in variant: %s", err)
 

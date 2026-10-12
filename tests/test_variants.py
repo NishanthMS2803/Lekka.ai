@@ -318,6 +318,7 @@ async def test_v5_dynamic_variant_multiround_and_risk_wave() -> None:
     )
 
     v5 = V5DynamicVariant(
+        llm=verif_fake,
         understand_llm=understand_fake,
         planner_llm=planner_fake,
         gapcheck_llm=gapcheck_fake,

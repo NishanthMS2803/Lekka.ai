@@ -109,24 +109,41 @@ BLOCKED_MODULES = {{
 
 ALLOWED_MODULES = {{
     "__main__",
+    "abc",
+    "bisect",
     "collections",
+    "contextlib",
     "copy",
+    "dataclasses",
     "datetime",
     "decimal",
+    "enum",
     "fractions",
     "functools",
+    "genericpath",
+    "heapq",
+    "io",
     "itertools",
     "json",
+    "linecache",
     "math",
+    "numbers",
     "numpy",
     "operator",
     "pandas",
+    "pathlib",
+    "posixpath",
+    "random",
     "re",
     "scipy",
+    "stat",
     "statistics",
     "string",
     "traceback",
+    "types",
     "typing",
+    "warnings",
+    "weakref",
 }}
 
 _orig_import = builtins.__import__
@@ -138,7 +155,7 @@ def secure_import(name, globals=None, locals=None, fromlist=(), level=0):
         raise ImportError(f"Import of module '{{name}}' is disallowed in sandbox.")
     if top_level in ALLOWED_MODULES:
         return _orig_import(name, globals, locals, fromlist, level)
-    is_blocked_sub = any(b in name for b in ("socket", "subproc", "posix"))
+    is_blocked_sub = any(b in name for b in ("socket", "subproc", "_posixsubprocess"))
     if name.startswith("_") and not is_blocked_sub:
         return _orig_import(name, globals, locals, fromlist, level)
     raise ImportError(
@@ -170,7 +187,9 @@ def audit_hook(event, args):
             except PermissionError:
                 raise
             except Exception as exc:
-                raise PermissionError(f"Path resolution check failed: {{exc}}")
+                raise PermissionError(
+                    f"File write outside sandbox temp directory blocked: {{exc}}"
+                )
     if event in ("os.mkdir", "os.rmdir", "os.remove", "os.rename", "os.unlink"):
         try:
             target = pathlib.Path(args[0]).resolve()
