@@ -309,3 +309,64 @@ def create_news_profile(
 
 
 NEWS_PROFILE: AgentProfile = create_news_profile()
+
+DEFAULT_FUNDAMENTAL_TOOLS: list[str] = [
+    "get_financials",
+    "list_filings",
+    "search_filings",
+    "get_analyst_estimates",
+    "get_industry_data",
+    "submit_answer",
+]
+
+
+def create_fundamental_profile(
+    registry: ToolRegistry | None = None,
+    system_prompt_path: str | Path | None = None,
+) -> AgentProfile:
+    """Create or load the standard 'fundamental' AgentProfile."""
+    try:
+        return load_agent_profile("fundamental", registry=registry)
+    except Exception:
+        fund_prompt_cand = (
+            Path(system_prompt_path)
+            if system_prompt_path
+            else Path("agents/prompts/fundamental.md")
+        )
+        return AgentProfile(
+            agent_type="fundamental",
+            allowed_tools=list(DEFAULT_FUNDAMENTAL_TOOLS),
+            system_prompt_path=str(fund_prompt_cand),
+        )
+
+
+FUNDAMENTAL_PROFILE: AgentProfile = create_fundamental_profile()
+
+DEFAULT_RISK_TOOLS: list[str] = [
+    "compute_risk_stats",
+    "get_market_data",
+    "submit_answer",
+]
+
+
+def create_risk_profile(
+    registry: ToolRegistry | None = None,
+    system_prompt_path: str | Path | None = None,
+) -> AgentProfile:
+    """Create or load the standard 'risk' AgentProfile."""
+    try:
+        return load_agent_profile("risk", registry=registry)
+    except Exception:
+        risk_prompt_cand = (
+            Path(system_prompt_path)
+            if system_prompt_path
+            else Path("agents/prompts/risk.md")
+        )
+        return AgentProfile(
+            agent_type="risk",
+            allowed_tools=list(DEFAULT_RISK_TOOLS),
+            system_prompt_path=str(risk_prompt_cand),
+        )
+
+
+RISK_PROFILE: AgentProfile = create_risk_profile()

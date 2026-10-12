@@ -1,5 +1,17 @@
 """Orchestration package for multi-agent financial research planning and state."""
 
+from lekka_ai.orchestrator.planner import (
+    EmptyPlanError,
+    GenericInstructionError,
+    InvalidDependencyError,
+    PlannedTaskSpec,
+    PlanSpec,
+    PlanValidationError,
+    UnknownAgentTypeError,
+    create_plan,
+    plan_query,
+    validate_plan,
+)
 from lekka_ai.orchestrator.state import (
     CycleDetectedError,
     Plan,
@@ -23,19 +35,29 @@ from lekka_ai.orchestrator.understand import (
 
 __all__ = [
     "CycleDetectedError",
+    "EmptyPlanError",
+    "GenericInstructionError",
+    "InvalidDependencyError",
     "ParsedQuery",
     "Plan",
+    "PlanSpec",
+    "PlanValidationError",
     "PlannedTask",
+    "PlannedTaskSpec",
     "QueryIntent",
     "RunState",
+    "UnknownAgentTypeError",
     "UnknownDependencyError",
     "UnknownTickerError",
     "ValidateTickerInput",
     "ValidateTickerOutput",
     "ValidateTickerTool",
+    "create_plan",
     "detect_cycles",
     "persist_task_status",
+    "plan_query",
     "ready_tasks",
     "topological_sort",
     "understand_query",
+    "validate_plan",
 ]

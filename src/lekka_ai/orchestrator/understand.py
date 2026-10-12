@@ -162,7 +162,7 @@ class ParsedQuery(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    intent: QueryIntentLiteral = Field(
+    intent: QueryIntent | QueryIntentLiteral = Field(
         ...,
         description=(
             "Primary research intent: 'investment_evaluation', 'valuation_check', "
