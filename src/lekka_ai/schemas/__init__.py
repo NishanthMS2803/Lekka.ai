@@ -8,6 +8,11 @@ from lekka_ai.schemas.news import (
     CatalystNovelty,
     NewsAnswerExtension,
 )
+from lekka_ai.schemas.risk import (
+    RankedRisk,
+    RiskAnswerExtension,
+    RiskSeverity,
+)
 from lekka_ai.schemas.submit import (
     AnswerExtension,
     AnswerStatus,
@@ -33,6 +38,9 @@ __all__ = [
     "Evidence",
     "MarketAnswerExtension",
     "NewsAnswerExtension",
+    "RankedRisk",
+    "RiskAnswerExtension",
+    "RiskSeverity",
     "ScenarioValues",
     "SubmitAnswer",
     "ValuationAnswerExtension",

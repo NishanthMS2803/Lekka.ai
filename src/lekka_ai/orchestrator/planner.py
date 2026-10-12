@@ -111,8 +111,8 @@ CORE ROUTING DIRECTIVES:
 
 2. INVESTMENT EVALUATION ('investment_evaluation', e.g. "Is AAPL attractive?"):
    - Wave-1 parallel tasks: 'fundamental', 'valuation', and 'news' with depends_on=[].
-   - Wave-2 synthesis task: 'risk' specialist, which MUST depend on ALL wave-1 tasks
-     ('fundamental', 'valuation', and 'news') to synthesize downside vulnerabilities.
+   - Wave-2 synthesis task: 'risk' specialist. The risk agent is WAVE 2 ONLY and MUST
+     depend on wave-1 tasks. It is NEVER wave-1.
 
 3. SPECIFIC TASK INSTRUCTIONS (CRITICAL):
    - You MUST provide highly detailed, concrete instructions for each specialist.
@@ -126,8 +126,8 @@ CORE ROUTING DIRECTIVES:
        revenue growth, gross and operating margin trajectories, and net debt."
      * Valuation: "Model bear, base, and bull DCF scenarios for AAPL as of {as_of_date}.
        Run reverse DCF at market price to solve for market-implied growth."
-     * Risk: "Synthesize findings from fundamental, valuation, and news agents.
-       Evaluate downside vulnerabilities, multiple compression, and leverage."
+     * Risk (Wave 2 only): "Review wave-1 conclusions. Assume the conclusion is wrong;
+       find evidence; rank failure modes; what would cause a 30-50% drawdown."
 
 4. DEPENDENCIES & PRIORITIES:
    - Independent data-gathering specialists are Wave 1 (depends_on: [], priority: 2).
@@ -208,8 +208,13 @@ def validate_plan(
         if task.agent_type == "risk":
             if not task.depends_on:
                 raise InvalidDependencyError(
-                    f"Risk agent task '{task.task_id}' must depend on wave-1 agents, "
-                    "but has empty depends_on."
+                    f"Risk agent task '{task.task_id}' is wave 2 only and must "
+                    "depend on wave-1 agents, but has empty depends_on."
+                )
+            if not wave_1_ids:
+                raise InvalidDependencyError(
+                    f"Risk agent task '{task.task_id}' is wave 2 only, but plan "
+                    "contains no wave-1 tasks."
                 )
             # If wave-1 tasks exist in the plan, risk agent must depend on wave-1 tasks
             if wave_1_ids and not set(task.depends_on).intersection(wave_1_ids):

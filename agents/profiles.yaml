@@ -91,15 +91,19 @@ fundamental:
 
 risk:
   allowed_tools:
-    - compute_risk_stats
     - get_market_data
+    - get_financials
+    - search_filings
+    - get_news
+    - get_industry_data
+    - compute_risk_stats
     - submit_answer
   prompt_file: agents/prompts/risk.md
-  answer_extension_schema: null
+  answer_extension_schema: lekka_ai.schemas.risk:RiskAnswerExtension
   default_limits:
-    max_iterations: 8
-    max_tokens: 100000
-    max_seconds: 60.0
-    max_tool_calls: 10
+    max_iterations: 10
+    max_tokens: 150000
+    max_seconds: 120.0
+    max_tool_calls: 15
     max_repair_attempts: 3
 
