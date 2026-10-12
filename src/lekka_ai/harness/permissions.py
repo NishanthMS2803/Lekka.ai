@@ -43,9 +43,10 @@ class AgentProfile(BaseModel):
 
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check whether the tool name is in the allowed tools list."""
-        if "*" in self.allowed_tools:
+        clean = tool_name.strip()
+        if "*" in self.allowed_tools or clean == "submit_answer":
             return True
-        return tool_name.strip() in {t.strip() for t in self.allowed_tools}
+        return clean in {t.strip() for t in self.allowed_tools}
 
     def load_system_prompt(self) -> str | None:
         """Read and return system prompt content from disk if path exists."""

@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from lekka_ai.harness.untrusted import (
     UNTRUSTED_DATA_SYSTEM_PROMPT,
@@ -15,6 +15,8 @@ from lekka_ai.harness.untrusted import (
 )
 from lekka_ai.llm.base import Message
 from lekka_ai.logging import get_logger
+from lekka_ai.schemas.submit import SubmitAnswer
+from lekka_ai.tools.submit import SubmitAnswerTool
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -33,7 +35,9 @@ class AgentRunResult(BaseModel):
     agent_type: str = Field(..., description="Role profile of the executing agent")
     status: str = Field(
         ...,
-        description="Outcome status ('completed', 'max_iterations', 'failed')",
+        description=(
+            "Outcome status ('completed', 'partial', 'max_iterations', 'failed')"
+        ),
     )
     final_text: str | None = Field(
         default=None,
@@ -59,6 +63,15 @@ class AgentRunResult(BaseModel):
         default=None,
         description="Identifier of the persisted or recorded agent run cycle",
     )
+    submission: SubmitAnswer | None = Field(
+        default=None,
+        description="Final validated SubmitAnswer payload if submitted",
+    )
+    repair_attempts: int = Field(
+        default=0,
+        ge=0,
+        description="Number of submit_answer validation repair attempts",
+    )
 
 
 class AgentRuntime:
@@ -76,11 +89,19 @@ class AgentRuntime:
         tool_view: ToolView,
         limits: Limits | None = None,
         *,
+        max_repair_attempts: int = 3,
         session: Session | None = None,
     ) -> AgentRunResult:
         """Execute an agent task through the runtime loop."""
         runtime = cls(session=session)
-        return await runtime.execute(task, profile, llm, tool_view, limits)
+        return await runtime.execute(
+            task,
+            profile,
+            llm,
+            tool_view,
+            limits,
+            max_repair_attempts=max_repair_attempts,
+        )
 
     async def execute(
         self,
@@ -89,8 +110,14 @@ class AgentRuntime:
         llm: LLMClient,
         tool_view: ToolView,
         limits: Limits | None = None,
+        *,
+        max_repair_attempts: int = 3,
     ) -> AgentRunResult:
         """Run inner loop: build prompt, call LLM, invoke tools, and log run row."""
+        # Ensure built-in submit_answer tool is registered
+        if "submit_answer" not in tool_view.registry._tools:
+            tool_view.registry.register(SubmitAnswerTool(), overwrite=True)
+
         system_prompt, messages = self._build_initial_messages(task, profile)
         allowed_specs = tool_view.specs()
 
@@ -100,6 +127,15 @@ class AgentRuntime:
             else 10
         )
         max_tokens = limits.max_tokens if limits else None
+        effective_max_repairs = (
+            limits.max_repair_attempts
+            if (
+                limits is not None
+                and hasattr(limits, "max_repair_attempts")
+                and limits.max_repair_attempts is not None
+            )
+            else max_repair_attempts
+        )
 
         # Setup agent_run database tracking if session is available
         agent_run_uuid, db_agent_run = self._initialize_db_agent_run(task)
@@ -114,9 +150,11 @@ class AgentRuntime:
         tokens_in = 0
         tokens_out = 0
         tool_calls_count = 0
+        repair_attempts = 0
         limits_hit: list[str] = []
         final_text: str | None = None
         status = "running"
+        submitted_answer: SubmitAnswer | None = None
         start_time = time.perf_counter()
 
         logger.info(
@@ -164,8 +202,91 @@ class AgentRuntime:
             assistant_content = response.text or ""
             messages.append(Message(role="assistant", content=assistant_content))
 
+            loop_should_end = False
             for tc in response.tool_calls:
                 tool_calls_count += 1
+
+                # Built-in submit_answer gate interception
+                if tc.name == "submit_answer":
+                    try:
+                        if isinstance(tc.args, SubmitAnswer):
+                            submission = tc.args
+                        else:
+                            submission = SubmitAnswer.model_validate(tc.args)
+
+                        tool_output = await tool_view.execute(tc.name, submission)
+                        formatted_output = wrap_tool_output(tc.name, tool_output)
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=formatted_output,
+                            )
+                        )
+                        submitted_answer = submission
+                        status = (
+                            submission.status.value
+                            if hasattr(submission.status, "value")
+                            else str(submission.status)
+                        )
+                        final_text = submission.confidence_rationale
+                        loop_should_end = True
+                        break
+                    except (ValidationError, ValueError) as exc:
+                        repair_attempts += 1
+                        err_msg = str(exc)
+
+                        # Record failed attempt span in tracer
+                        async with tool_view.tracer.span(
+                            tc.name,
+                            span_type="tool",
+                            tool_name=tc.name,
+                            agent_run_id=tool_view.agent_run_id,
+                            input_json=tc.args if isinstance(tc.args, dict) else {},
+                        ) as err_span:
+                            err_span.status = "error"
+                            err_span.error = err_msg
+
+                        if repair_attempts >= effective_max_repairs:
+                            status = "partial"
+                            limits_hit.append("submit_validation_failed")
+                            obs_msg = (
+                                f"Validation failed for submit_answer "
+                                f"({repair_attempts}/{effective_max_repairs}):\n"
+                                f"{err_msg}\n"
+                                "Maximum repair attempts exceeded. Ending task."
+                            )
+                            messages.append(
+                                Message(
+                                    role="tool",
+                                    content=wrap_tool_output(
+                                        tc.name,
+                                        {"error": obs_msg, "status": "partial"},
+                                    ),
+                                )
+                            )
+                            loop_should_end = True
+                            break
+                        else:
+                            obs_msg = (
+                                f"Validation failed for submit_answer "
+                                f"({repair_attempts}/{effective_max_repairs}):\n"
+                                f"{err_msg}\n"
+                                "Please repair the errors and call submit_answer again."
+                            )
+                            messages.append(
+                                Message(
+                                    role="tool",
+                                    content=wrap_tool_output(
+                                        tc.name,
+                                        {
+                                            "error": obs_msg,
+                                            "repair_attempt": repair_attempts,
+                                        },
+                                    ),
+                                )
+                            )
+                            break
+
                 try:
                     tool_output = await tool_view.execute(tc.name, tc.args)
                 except Exception as exc:
@@ -184,6 +305,9 @@ class AgentRuntime:
                         content=formatted_output,
                     )
                 )
+
+            if loop_should_end:
+                break
 
             # Check tool call limit if configured
             if (
@@ -232,6 +356,8 @@ class AgentRuntime:
             tool_calls_count=tool_calls_count,
             limits_hit=limits_hit,
             agent_run_id=run_id_str,
+            submission=submitted_answer,
+            repair_attempts=repair_attempts,
         )
 
     def _build_initial_messages(

@@ -71,6 +71,10 @@ from lekka_ai.tools.search_filings import (
     SearchFilingsOutput,
     SearchFilingsTool,
 )
+from lekka_ai.tools.submit import (
+    SubmitAnswerOutput,
+    SubmitAnswerTool,
+)
 
 __all__ = [
     "AnalystEstimatesPayload",
@@ -129,6 +133,8 @@ __all__ = [
     "SearchFilingsInput",
     "SearchFilingsOutput",
     "SearchFilingsTool",
+    "SubmitAnswerOutput",
+    "SubmitAnswerTool",
     "TTL_POLICIES",
     "Tool",
     "ToolRegistry",

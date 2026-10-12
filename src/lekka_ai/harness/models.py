@@ -75,6 +75,11 @@ class Limits(BaseModel):
         ge=0,
         description="Maximum number of tool invocations allowed",
     )
+    max_repair_attempts: int | None = Field(
+        default=3,
+        ge=0,
+        description="Maximum schema validation repair attempts for submit_answer",
+    )
 
     def is_exceeded(
         self,

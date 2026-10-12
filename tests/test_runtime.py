@@ -315,3 +315,240 @@ async def test_runtime_logs_db_agent_runs_row(registry: ToolRegistry) -> None:
             next(session_generator)
         except StopIteration:
             pass
+
+
+@pytest.mark.asyncio
+async def test_runtime_valid_submit_ends_loop(registry: ToolRegistry) -> None:
+    """Valid submit_answer call immediately ends runtime loop with completed status."""
+    task = AgentTask(
+        task_id="task_valid_sub_01",
+        agent_type="analyst",
+        instruction="Calculate Apple FY2024 revenue.",
+    )
+    profile = AgentProfile(agent_type="analyst")
+    tracer = Tracer()
+    tool_view = ToolView(registry, profile, tracer=tracer)
+
+    submit_payload = {
+        "task_id": "task_valid_sub_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_01",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.98,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "document_id": "0000320193-24-000106",
+                        "tool_call_id": "tc_echo_01",
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.98,
+        "confidence_rationale": "Directly grounded in SEC 10-K filing.",
+    }
+
+    call = LLMResponse(
+        text="Submitting finalized grounded answer.",
+        tool_calls=[
+            ToolCall(
+                id="tc_sub_01",
+                name="submit_answer",
+                args=submit_payload,
+            )
+        ],
+        usage=Usage(input_tokens=20, output_tokens=15),
+    )
+
+    fake_llm = FakeLLM(responses=[call])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=5),
+    )
+
+    assert result.status == "completed"
+    assert result.iterations == 1
+    assert result.tool_calls_count == 1
+    assert result.repair_attempts == 0
+    assert result.submission is not None
+    assert result.submission.task_id == "task_valid_sub_01"
+    assert result.submission.confidence == 0.98
+    assert result.final_text == "Directly grounded in SEC 10-K filing."
+    assert "Answer submission accepted and validated." in result.messages[-1].content
+    assert len(tracer.spans) == 1
+    assert tracer.spans[0].status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_runtime_invalid_submit_triggers_repair(
+    registry: ToolRegistry,
+) -> None:
+    """Invalid submit_answer returns validation error observation and allows repair."""
+    task = AgentTask(
+        task_id="task_repair_01",
+        agent_type="analyst",
+        instruction="Determine Apple FY2024 revenue.",
+    )
+    profile = AgentProfile(agent_type="analyst")
+    tracer = Tracer()
+    tool_view = ToolView(registry, profile, tracer=tracer)
+
+    # Turn 1: Invalid submission (status='completed' with 0 claims is rejected)
+    invalid_payload = {
+        "task_id": "task_repair_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [],
+        "confidence": 0.9,
+        "confidence_rationale": "Premature submission without grounded claims.",
+    }
+    call_1 = LLMResponse(
+        text="Submitting answer...",
+        tool_calls=[
+            ToolCall(id="tc_sub_inv", name="submit_answer", args=invalid_payload)
+        ],
+        usage=Usage(input_tokens=15, output_tokens=10),
+    )
+
+    # Turn 2: Repaired submission with grounded claim
+    valid_payload = {
+        "task_id": "task_repair_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [
+            {
+                "claim_id": "claim_rep_01",
+                "text": "Apple FY2024 revenue was $391.0B.",
+                "type": "fact",
+                "confidence": 0.95,
+                "evidence": [
+                    {
+                        "source_type": "sec_filing",
+                        "tool_call_id": "tc_step_01",
+                    }
+                ],
+            }
+        ],
+        "confidence": 0.95,
+        "confidence_rationale": "Repaired submission with verified SEC evidence.",
+    }
+    call_2 = LLMResponse(
+        text="Repairing submission with required evidence claim.",
+        tool_calls=[
+            ToolCall(id="tc_sub_valid", name="submit_answer", args=valid_payload)
+        ],
+        usage=Usage(input_tokens=30, output_tokens=20),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=5),
+    )
+
+    assert result.status == "completed"
+    assert result.iterations == 2
+    assert result.repair_attempts == 1
+    assert result.submission is not None
+    assert result.submission.confidence == 0.95
+
+    # Check observation returned to agent in message 2
+    assert result.messages[2].role == "tool"
+    assert "Validation failed for submit_answer (1/3)" in result.messages[2].content
+    assert (
+        "Completed answers require at least one grounded Claim"
+        in result.messages[2].content
+    )
+
+    # Check accepted submission in message 4
+    assert result.messages[4].role == "tool"
+    assert "Answer submission accepted and validated." in result.messages[4].content
+
+
+@pytest.mark.asyncio
+async def test_runtime_three_failures_end_gracefully(
+    registry: ToolRegistry,
+) -> None:
+    """3 consecutive validation failures terminate runtime with status=partial."""
+    task = AgentTask(
+        task_id="task_fail_01",
+        agent_type="analyst",
+        instruction="Analyze complex market event.",
+    )
+    profile = AgentProfile(agent_type="analyst")
+    tracer = Tracer()
+    tool_view = ToolView(registry, profile, tracer=tracer)
+
+    # Three invalid submissions with different validation flaws
+    invalid_1 = {
+        "task_id": "task_fail_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [],  # Violates completed claims constraint
+        "confidence": 0.8,
+        "confidence_rationale": "Attempt 1 without claims.",
+    }
+    invalid_2 = {
+        "task_id": "task_fail_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [],
+        "confidence": 2.5,  # Violates confidence le=1.0 constraint
+        "confidence_rationale": "Attempt 2 invalid confidence.",
+    }
+    invalid_3 = {
+        "task_id": "task_fail_01",
+        "agent_type": "analyst",
+        "status": "completed",
+        "claims": [],
+        "confidence": -0.5,  # Violates confidence ge=0.0 constraint
+        "confidence_rationale": "Attempt 3 negative confidence.",
+    }
+
+    call_1 = LLMResponse(
+        text="Attempt 1",
+        tool_calls=[ToolCall(id="tc_1", name="submit_answer", args=invalid_1)],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_2 = LLMResponse(
+        text="Attempt 2",
+        tool_calls=[ToolCall(id="tc_2", name="submit_answer", args=invalid_2)],
+        usage=Usage(input_tokens=15, output_tokens=5),
+    )
+    call_3 = LLMResponse(
+        text="Attempt 3",
+        tool_calls=[ToolCall(id="tc_3", name="submit_answer", args=invalid_3)],
+        usage=Usage(input_tokens=20, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+        limits=Limits(max_iterations=10),
+    )
+
+    # Must terminate after 3 repair attempts, not running up to max_iterations=10
+    assert result.status == "partial"
+    assert result.iterations == 3
+    assert result.repair_attempts == 3
+    assert result.submission is None
+    assert "submit_validation_failed" in result.limits_hit
+
+    # Verify final gate error message
+    assert (
+        "Maximum repair attempts exceeded. Ending task." in result.messages[-1].content
+    )
+    assert tracer.spans[-1].status == "error"
