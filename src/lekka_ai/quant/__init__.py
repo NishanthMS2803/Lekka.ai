@@ -17,6 +17,12 @@ from lekka_ai.quant.fundamentals import (
     operating_margin,
     yoy_growth,
 )
+from lekka_ai.quant.reverse_dcf import (
+    ReverseDCFResult,
+    reverse_dcf,
+    solve_implied_growth,
+    solve_implied_margin,
+)
 from lekka_ai.quant.stats import (
     MaxDrawdownResult,
     align_series,
@@ -63,9 +69,13 @@ __all__ = [
     "period_returns",
     "relative_strength",
     "relative_strength_series",
+    "ReverseDCFResult",
+    "reverse_dcf",
     "simple_moving_average",
     "simple_returns",
     "sma",
+    "solve_implied_growth",
+    "solve_implied_margin",
     "validate_dcf_inputs",
     "yoy_growth",
 ]
