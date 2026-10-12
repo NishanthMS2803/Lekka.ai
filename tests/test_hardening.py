@@ -206,10 +206,13 @@ def test_redaction_of_secrets_in_logs_and_traces() -> None:
         output_json={"auth_token": "bearer_secret", "result": 42},
         metadata={"sec_user_agent": "secret_agent", "info": "ok"},
     )
+    assert isinstance(span.input_json, dict)
     assert span.input_json["api_key"] == "[REDACTED]"
     assert span.input_json["ticker"] == "AAPL"
+    assert isinstance(span.output_json, dict)
     assert span.output_json["auth_token"] == "[REDACTED]"
     assert span.output_json["result"] == 42
+    assert isinstance(span.metadata, dict)
     assert span.metadata["sec_user_agent"] == "[REDACTED]"
     assert span.metadata["info"] == "ok"
 

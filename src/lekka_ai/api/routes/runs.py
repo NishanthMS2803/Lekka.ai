@@ -399,12 +399,12 @@ async def get_run_trace(
                                 name=f"agent:{task.agent_type}",
                                 id=str(ar.id),
                                 parent_id=None,
-                                start_time=(
-                                    ar.created_at or db_run.created_at
-                                ).isoformat(),
-                                end_time=(ar.finished_at).isoformat()
-                                if ar.finished_at
-                                else None,
+                                start_time=db_run.created_at.isoformat(),
+                                end_time=(
+                                    db_run.finished_at.isoformat()
+                                    if db_run.finished_at
+                                    else None
+                                ),
                                 latency_ms=None,
                                 status=ar.status,
                                 error=None,
@@ -452,18 +452,18 @@ async def get_run_trace(
     ):
         ti = 0
         to = 0
-        tc = 0
+        tc_count = 0
         for res in record.outcome.state.results.values():
             if isinstance(res, TaskResult) and res.usage:
                 ti += int(res.usage.get("tokens_in", 0))
                 to += int(res.usage.get("tokens_out", 0))
-                tc += int(res.usage.get("tool_calls", 0))
+                tc_count += int(res.usage.get("tool_calls", 0))
         if ti > 0 or to > 0:
             tokens_in = ti
             tokens_out = to
             total_tokens = ti + to
-        if tc > tool_calls:
-            tool_calls = tc
+        if tc_count > tool_calls:
+            tool_calls = tc_count
 
     if record.tracer:
         span_tool_count = sum(

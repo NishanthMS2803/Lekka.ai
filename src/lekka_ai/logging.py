@@ -3,7 +3,8 @@
 import logging
 import re
 import sys
-from typing import Any, TextIO
+from collections.abc import MutableMapping
+from typing import Any, TextIO, cast
 
 import structlog
 from structlog.types import Processor
@@ -86,10 +87,10 @@ def redact_secrets(val: Any) -> Any:
 def redact_secrets_processor(
     _logger: Any,
     _method_name: str,
-    event_dict: dict[str, Any],
-) -> dict[str, Any]:
+    event_dict: MutableMapping[str, Any],
+) -> MutableMapping[str, Any]:
     """Structlog processor to sanitize sensitive tokens and credentials."""
-    return redact_secrets(event_dict)
+    return cast(MutableMapping[str, Any], redact_secrets(dict(event_dict)))
 
 
 def configure_logging(
