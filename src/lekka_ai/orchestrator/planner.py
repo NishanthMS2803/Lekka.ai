@@ -9,9 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lekka_ai.agents import load_profiles
 from lekka_ai.config import get_settings
 from lekka_ai.harness.permissions import AgentProfile
+from lekka_ai.harness.profiles import load_profiles
 from lekka_ai.llm.base import LLMClient, Message
 from lekka_ai.llm.gemini import GeminiClient
 from lekka_ai.orchestrator.state import Plan, PlannedTask

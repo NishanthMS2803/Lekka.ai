@@ -44,6 +44,11 @@ from lekka_ai.harness.runtime import (
     AgentRunResult,
     AgentRuntime,
 )
+from lekka_ai.harness.scheduler import (
+    TaskRunnerCallable,
+    TaskScheduler,
+    run_ready_tasks_parallel,
+)
 from lekka_ai.harness.untrusted import (
     UNTRUSTED_DATA_PROMPT_SNIPPET,
     UNTRUSTED_DATA_SYSTEM_PROMPT,
@@ -74,6 +79,8 @@ __all__ = [
     "PermissionDenied",
     "RepeatedToolCallError",
     "RetryableToolError",
+    "TaskRunnerCallable",
+    "TaskScheduler",
     "ToolError",
     "ToolView",
     "VALUATION_PROFILE",
@@ -91,6 +98,7 @@ __all__ = [
     "load_agent_profile",
     "load_profiles",
     "load_profiles_from_dict",
+    "run_ready_tasks_parallel",
     "validate_profile_tools",
     "wrap_tool_output",
     "wrap_untrusted_content",
