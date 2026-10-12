@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.middleware.base import RequestResponseEndpoint
 
+from lekka_ai.config import verify_startup_configuration
 from lekka_ai.logging import bind_request_id, clear_context, get_logger
 
 logger = get_logger(__name__)
@@ -27,6 +28,9 @@ class HealthResponse(BaseModel):
 
 def create_app(cors_origins: list[str] | None = None) -> FastAPI:
     """Create and configure a FastAPI application instance."""
+    # Enforce startup security constraints (e.g. fault injection outside dev/test)
+    verify_startup_configuration()
+
     app = FastAPI(
         title="Lekka AI API",
         description="Multi-agent financial research system API",

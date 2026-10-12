@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from lekka_ai.db.repository import create_tool_call
 from lekka_ai.db.session import get_session_factory
 from lekka_ai.llm.base import LLMClient, LLMResponse, Message, ToolSpec, Usage
-from lekka_ai.logging import get_logger
+from lekka_ai.logging import get_logger, redact_secrets
 from lekka_ai.tools.base import Tool
 
 logger = get_logger(__name__)
@@ -44,6 +44,15 @@ class Span:
     output_json: dict[str, Any] | list[Any] | None = None
     cache_hit: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Sanitize secrets from input, output, and metadata payloads."""
+        if self.input_json is not None:
+            self.input_json = redact_secrets(self.input_json)
+        if self.output_json is not None:
+            self.output_json = redact_secrets(self.output_json)
+        if self.metadata is not None:
+            self.metadata = redact_secrets(self.metadata)
 
     @property
     def parent_id(self) -> uuid.UUID | None:
@@ -273,9 +282,9 @@ def wrap_tool_run[InT: BaseModel, OutT: BaseModel](
                 result = await tool.execute(input_data)
 
             if isinstance(result, BaseModel):
-                span.output_json = result.model_dump()
+                span.output_json = redact_secrets(result.model_dump())
             elif isinstance(result, (dict, list)):
-                span.output_json = result
+                span.output_json = redact_secrets(result)
             return result
 
     return wrapped

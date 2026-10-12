@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lekka_ai.config import get_settings
 from lekka_ai.db.models import ClaimModel
@@ -103,6 +103,16 @@ class SynthesizedReport(BaseModel):
     attempts: int = 1
     rejection_reasons: list[str] = Field(default_factory=list)
     ticker: str | None = None
+
+    @model_validator(mode="after")
+    def ensure_disclaimer(self) -> Self:
+        """Guarantee visible disclaimer is present in synthesized markdown."""
+        if "research tool, not financial advice" not in self.markdown.lower():
+            self.markdown = (
+                f"{self.markdown.rstrip()}\n\n---\n"
+                "> **Disclaimer:** Lekka AI is a research tool, not financial advice."
+            )
+        return self
 
 
 class ReportValidationError(Exception):

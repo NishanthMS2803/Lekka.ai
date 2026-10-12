@@ -49,6 +49,9 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-3">
+          <span className="hidden lg:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/60">
+            <span>⚠️</span> Research tool, not financial advice
+          </span>
           <HealthIndicator />
           <a
             href="http://localhost:8000/docs"

@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from lekka_ai.config import get_settings
 from lekka_ai.db.models import ClaimModel
 from lekka_ai.schemas.claims import Claim
 
@@ -17,6 +18,10 @@ class CreateRunRequest(BaseModel):
     question: str = Field(
         ...,
         description="Natural language equity research prompt or question",
+    )
+    ticker: str | None = Field(
+        default=None,
+        description="Optional target equity ticker symbol (e.g. 'AAPL')",
     )
     as_of_date: str | date | None = Field(
         default=None,
@@ -34,6 +39,47 @@ class CreateRunRequest(BaseModel):
         default=None,
         description="Optional chaos fault injection plan (disabled in production)",
     )
+
+    @field_validator("question")
+    @classmethod
+    def validate_question_length(cls, v: str) -> str:
+        """Validate question character length against configured maximum limit."""
+        settings = get_settings()
+        max_len = settings.MAX_QUESTION_LENGTH
+        if len(v.strip()) > max_len:
+            raise ValueError(
+                f"Question exceeds maximum allowed length of {max_len} characters."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_security_and_budget(self) -> Self:
+        """Validate ticker against allowlist and enforce hard per-run cost cap."""
+        settings = get_settings()
+
+        # 1. Ticker allowlist validation
+        target_ticker = self.ticker or (self.config or {}).get("ticker")
+        if target_ticker:
+            allowlist = settings.TICKER_ALLOWLIST
+            is_enforced = settings.TICKER_ALLOWLIST_ENABLED or allowlist is not None
+            if is_enforced and allowlist:
+                allowed_set = {t.strip().upper() for t in allowlist}
+                if str(target_ticker).strip().upper() not in allowed_set:
+                    raise ValueError(
+                        f"Ticker '{target_ticker}' is not in the allowed universe."
+                    )
+
+        # 2. Hard per-run cost cap enforcement
+        if self.budget and isinstance(self.budget, dict):
+            cap = settings.HARD_PER_RUN_COST_CAP_USD
+            for cost_key in ("cost", "max_usd", "max_cost_usd"):
+                if cost_key in self.budget and self.budget[cost_key] is not None:
+                    try:
+                        self.budget[cost_key] = min(float(self.budget[cost_key]), cap)
+                    except (ValueError, TypeError):
+                        pass
+
+        return self
 
 
 class RunCreateResponse(BaseModel):
@@ -94,10 +140,19 @@ class RunReportResponse(BaseModel):
         default=None,
         description="Alias for markdown field",
     )
+    disclaimer: str = Field(
+        default="Lekka AI is a research tool, not financial advice.",
+        description="Mandatory regulatory disclaimer",
+    )
 
     @model_validator(mode="after")
     def set_report_alias(self) -> Self:
-        """Mirror markdown into report alias if unset."""
+        """Mirror markdown into report alias and ensure disclaimer is present."""
+        if "research tool, not financial advice" not in self.markdown.lower():
+            self.markdown = (
+                f"{self.markdown.rstrip()}\n\n---\n"
+                "> **Disclaimer:** Lekka AI is a research tool, not financial advice."
+            )
         if self.report is None:
             self.report = self.markdown
         return self

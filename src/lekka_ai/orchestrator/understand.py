@@ -342,7 +342,21 @@ async def understand_query(
     if not parsed.as_of_date:
         parsed.as_of_date = default_date
 
-    # 5. Ticker validation & rejection of unknown tickers
+    # 5. Ticker allowlist & directory validation
+    settings = get_settings()
+    allowlist = settings.TICKER_ALLOWLIST
+    is_allowlist_enforced = settings.TICKER_ALLOWLIST_ENABLED or (
+        allowlist is not None and len(allowlist) > 0
+    )
+    allowed_set = {t.strip().upper() for t in allowlist} if allowlist else set()
+
+    if parsed.tickers and is_allowlist_enforced:
+        for ticker in parsed.tickers:
+            if ticker.strip().upper() not in allowed_set:
+                raise UnknownTickerError(
+                    f"Ticker '{ticker}' is not in the allowed ticker universe."
+                )
+
     if validate_tickers and parsed.tickers:
         validator = ticker_tool or default_validate_ticker_tool
         for ticker in parsed.tickers:

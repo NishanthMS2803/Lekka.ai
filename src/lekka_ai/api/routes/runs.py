@@ -6,7 +6,15 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -29,12 +37,14 @@ from lekka_ai.api.models import (
     SpanResponse,
     claim_to_response,
 )
+from lekka_ai.api.ratelimit import default_rate_limiter, get_client_ip
 from lekka_ai.api.services import RunManager
+from lekka_ai.config import get_settings
 from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.repository import get_run as get_db_run
 from lekka_ai.events import EventBus
 from lekka_ai.llm.base import LLMClient
-from lekka_ai.logging import get_logger
+from lekka_ai.logging import get_logger, redact_secrets
 from lekka_ai.orchestrator.dispatch import TaskResult
 from lekka_ai.orchestrator.engine import RunOutcome, TaskRunnerCallable
 from lekka_ai.tools.base import ToolRegistry
@@ -59,6 +69,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 async def create_run(
     request: CreateRunRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
     llm: Annotated[LLMClient, Depends(get_llm)],
     run_manager: Annotated[RunManager, Depends(get_run_manager)],
     task_runner: Annotated[TaskRunnerCallable | None, Depends(get_task_runner)] = None,
@@ -66,6 +77,35 @@ async def create_run(
     session: Annotated[Session | None, Depends(get_optional_db_session)] = None,
 ) -> RunCreateResponse:
     """Launch orchestrator engine in background task and return run_id."""
+    settings = get_settings()
+
+    # 1. Enforce client request rate limiting
+    default_rate_limiter.check(get_client_ip(http_request))
+
+    # 2. Enforce active run concurrency limits
+    active_runs = run_manager.get_active_runs_count()
+    if active_runs >= settings.MAX_CONCURRENT_RUNS:
+        limit = settings.MAX_CONCURRENT_RUNS
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Maximum concurrent runs limit reached ({limit}). "
+                "Please wait for an active run to complete before launching a new run."
+            ),
+        )
+
+    # 3. Enforce fault injection prohibition outside test/dev environments
+    if request.fault_plan is not None:
+        env_lower = settings.ENV.lower()
+        if env_lower not in ("development", "dev", "test", "testing"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Chaos fault injection is strictly prohibited outside "
+                    "development/test environments."
+                ),
+            )
+
     run_id = str(uuid.uuid4())
     run_manager.create_run(
         run_id=run_id,
@@ -316,12 +356,12 @@ async def get_run_trace(
     spans_data: list[SpanResponse] = []
     if record.tracer and record.tracer.spans:
         for s in record.tracer.spans:
-            input_val = (
+            input_val = redact_secrets(
                 s.input_json
                 if s.input_json is not None
                 else s.metadata.get("input_json")
             )
-            output_val = (
+            output_val = redact_secrets(
                 s.output_json
                 if s.output_json is not None
                 else s.metadata.get("output_json")
@@ -340,7 +380,7 @@ async def get_run_trace(
                     tool_name=s.tool_name,
                     input_json=input_val,
                     output_json=output_val,
-                    metadata=dict(s.metadata or {}),
+                    metadata=redact_secrets(dict(s.metadata or {})),
                 )
             )
 
@@ -389,9 +429,11 @@ async def get_run_trace(
                                     error=tc.error,
                                     span_type="tool",
                                     tool_name=tc.tool_name,
-                                    input_json=tc.input_json,
-                                    output_json=tc.output_json,
-                                    metadata={"cache_hit": tc.cache_hit},
+                                    input_json=redact_secrets(tc.input_json),
+                                    output_json=redact_secrets(tc.output_json),
+                                    metadata=redact_secrets(
+                                        {"cache_hit": tc.cache_hit}
+                                    ),
                                 )
                                 spans_data.append(tc_span)
         except Exception as e:

@@ -72,7 +72,17 @@ class RunBudget(Budget):
             "tracer": tracer,
         }
         init_kwargs.update(overrides)
+        # Enforce hard per-run cost cap from application settings
+        requested_cost = float(init_kwargs.get("cost", s.DEFAULT_RUN_BUDGET_USD))
+        init_kwargs["cost"] = min(requested_cost, s.HARD_PER_RUN_COST_CAP_USD)
         return cls(**init_kwargs)
+
+    def is_exhausted(self, resource: str | None = None) -> bool:
+        """Check budget exhaustion including hard per-run cost cap from config."""
+        s = get_settings()
+        if self.used_cost >= s.HARD_PER_RUN_COST_CAP_USD:
+            return True
+        return super().is_exhausted(resource)
 
     def estimate_usd(self, tokens_in: int, tokens_out: int = 0) -> float:
         """Estimate dollar cost from input and output tokens."""
@@ -82,6 +92,9 @@ class RunBudget(Budget):
 
     def can_allocate(self, task: PlannedTask | AgentTask | None = None) -> bool:
         """Determine whether the budget has available capacity to launch a task."""
+        s = get_settings()
+        if self.used_cost >= s.HARD_PER_RUN_COST_CAP_USD:
+            return False
         if self.is_exhausted():
             return False
 

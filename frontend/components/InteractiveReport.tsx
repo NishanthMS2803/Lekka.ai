@@ -82,8 +82,18 @@ export function InteractiveReport({
   }, [markdown, claimSentences, onSelectClaim, selectedClaimId]);
 
   return (
-    <div className="prose dark:prose-invert max-w-none text-zinc-800 dark:text-zinc-200">
-      {renderedContent}
+    <div className="space-y-4">
+      <div className="prose dark:prose-invert max-w-none text-zinc-800 dark:text-zinc-200">
+        {renderedContent}
+      </div>
+
+      {/* Regulatory Compliance Disclaimer Box */}
+      <div className="mt-6 pt-4 border-t border-zinc-200 dark:border-zinc-800 flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-300">
+        <span className="text-sm shrink-0 mt-0.5">⚠️</span>
+        <div className="leading-relaxed">
+          <strong className="font-semibold">Disclaimer:</strong> Lekka AI is an autonomous research tool, not financial advice. All valuation models, claims, citations, and risk analyses are generated for research and educational purposes only and do not constitute financial advisory services or investment recommendations.
+        </div>
+      </div>
     </div>
   );
 }
