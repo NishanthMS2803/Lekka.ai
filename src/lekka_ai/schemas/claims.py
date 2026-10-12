@@ -139,6 +139,11 @@ class Claim(BaseModel):
         """Validate integrity rules for facts, calculations, and interpretations."""
         # 1. Fact claims must have at least one Evidence object with tool_call_id
         if self.type == ClaimType.FACT:
+            is_direct = self.produced_by == "direct_llm" or any(
+                e.source_type == "direct_llm" for e in self.evidence
+            )
+            if is_direct:
+                return self
             if not self.evidence:
                 raise ValueError("Fact claims require at least one Evidence object.")
             has_tool_call = any(

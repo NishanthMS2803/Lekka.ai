@@ -1,5 +1,10 @@
 """Agent harness data contracts, execution engine, and limits."""
 
+from lekka_ai.harness.direct import (
+    DirectLLMRunner,
+    ExtractedNumericClaims,
+    NumericClaimItem,
+)
 from lekka_ai.harness.errors import (
     RepeatedToolCallError,
     RetryableToolError,
@@ -49,7 +54,10 @@ __all__ = [
     "AgentTask",
     "Budget",
     "BudgetExhaustedError",
+    "DirectLLMRunner",
+    "ExtractedNumericClaims",
     "Limits",
+    "NumericClaimItem",
     "PermissionDenied",
     "RepeatedToolCallError",
     "RetryableToolError",

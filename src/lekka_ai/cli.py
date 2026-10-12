@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from lekka_ai.config import get_settings
+from lekka_ai.harness.direct import DirectLLMRunner
 from lekka_ai.harness.models import AgentTask, Limits
 from lekka_ai.harness.permissions import ToolView
 from lekka_ai.harness.profiles import create_analyst_profile
@@ -30,6 +31,7 @@ console = Console()
 async def _run_ask(
     question: str,
     as_of: str | None,
+    variant: str = "agent",
     max_iterations: int = 10,
     timeout: float = 120.0,
 ) -> AgentRunResult:
@@ -45,14 +47,23 @@ async def _run_ask(
         api_key=settings.GEMINI_API_KEY,
         model=settings.GEMINI_MODEL,
     )
-    profile = create_analyst_profile()
-    tool_view = ToolView(default_registry, profile=profile)
 
     task = AgentTask(
         instruction=question,
         as_of_date=as_of,
-        agent_type="analyst",
+        agent_type="direct" if variant.lower() == "direct" else "analyst",
     )
+
+    if variant.lower() == "direct":
+        return await DirectLLMRunner.run(
+            task=task,
+            llm=llm,
+            as_of_date=as_of,
+        )
+
+    profile = create_analyst_profile()
+    tool_view = ToolView(default_registry, profile=profile)
+
     limits = Limits(
         max_iterations=max_iterations,
         max_seconds=timeout,
@@ -146,6 +157,14 @@ def ask(
         "--as-of",
         help="Point-in-time cutoff date (YYYY-MM-DD).",
     ),
+    variant: str = typer.Option(
+        "agent",
+        "--variant",
+        help=(
+            "Execution variant: 'agent' (default V2 harness with tools) "
+            "or 'direct' (V1 direct LLM baseline)."
+        ),
+    ),
     max_iterations: int = typer.Option(
         10,
         "--max-iterations",
@@ -167,21 +186,27 @@ def ask(
 ) -> None:
     """Investigate a financial question using the baseline analyst agent."""
     console.print()
+    is_direct = variant.strip().lower() == "direct"
+    title_suffix = " (Direct LLM Baseline - V1)" if is_direct else ""
     header_text = Text()
-    header_text.append("Lekka AI Financial Analyst\n", style="bold blue")
+    header_text.append(f"Lekka AI Financial Analyst{title_suffix}\n", style="bold blue")
     header_text.append(f"Query: {question}\n", style="white")
     if as_of:
         header_text.append(f"Cutoff Date: {as_of}\n", style="yellow")
     console.print(Panel(header_text, border_style="blue"))
 
-    with console.status(
-        "[bold green]Analyst investigating using tools...", spinner="dots"
-    ):
+    status_msg = (
+        "Direct LLM generating response and extracting claims..."
+        if is_direct
+        else "Analyst investigating using tools..."
+    )
+    with console.status(f"[bold green]{status_msg}", spinner="dots"):
         try:
             result = asyncio.run(
                 _run_ask(
                     question=question,
                     as_of=as_of,
+                    variant=variant,
                     max_iterations=max_iterations,
                     timeout=timeout,
                 )
@@ -214,11 +239,12 @@ def ask(
     )
 
     # Answer text / Rationale
-    answer_text = (
-        submission.confidence_rationale
-        if submission and submission.confidence_rationale
-        else result.final_text or "No answer returned."
-    )
+    if result.agent_type == "direct" and result.final_text:
+        answer_text = result.final_text
+    elif submission and submission.confidence_rationale:
+        answer_text = submission.confidence_rationale
+    else:
+        answer_text = result.final_text or "No answer returned."
     console.print(
         Panel(
             answer_text,
