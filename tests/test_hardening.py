@@ -168,9 +168,9 @@ def test_redaction_of_secrets_in_logs_and_traces() -> None:
     """Secrets, API keys, and sensitive tokens are masked in logs and traces."""
     # 1. Redact secrets in dict keys
     payload = {
-        "api_key": "AQ.Ab8RN6Jo3f61w4tCaPBu7zA-JW--xaN8nKtFSjLSN_vT1aV29g",
-        "secret_token": "sk-1234567890abcdef1234567890abcdef",
-        "gemini_api_key": "AQ.secret123456789012345678901234567890",
+        "api_key": "AQ.mockSampleGeminiKey1234567890abcdefghijklmnop",
+        "secret_token": "sk-mockTestSecretToken1234567890abcdef",
+        "gemini_api_key": "AQ.mockSecretKey123456789012345678901234567890",
         "password": "supersecretpassword",
         "nested": {
             "auth": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
@@ -188,10 +188,10 @@ def test_redaction_of_secrets_in_logs_and_traces() -> None:
     # 2. Redact pattern inside raw string
     raw_str = (
         "Error calling Gemini with key "
-        "AQ.Ab8RN6Jo3f61w4tCaPBu7zA-JW--xaN8nKtFSjLSN_vT1aV29g failed"
+        "AQ.mockSampleGeminiKey1234567890abcdefghijklmnop failed"
     )
     masked_str = redact_secrets(raw_str)
-    assert "AQ.Ab8RN6Jo" not in masked_str
+    assert "AQ.mockSample" not in masked_str
     assert "[REDACTED]" in masked_str
 
     # 3. Structlog processor
