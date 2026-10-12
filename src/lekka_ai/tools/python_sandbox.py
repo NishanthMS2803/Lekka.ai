@@ -151,17 +151,12 @@ _orig_import = builtins.__import__
 
 def secure_import(name, globals=None, locals=None, fromlist=(), level=0):
     top_level = name.split(".")[0]
-    if top_level in BLOCKED_MODULES or any(b in name for b in ("socket", "subprocess")):
-        raise ImportError(f"Import of module '{{name}}' is disallowed in sandbox.")
-    if top_level in ALLOWED_MODULES:
-        return _orig_import(name, globals, locals, fromlist, level)
-    is_blocked_sub = any(b in name for b in ("socket", "subproc", "_posixsubprocess"))
-    if name.startswith("_") and not is_blocked_sub:
-        return _orig_import(name, globals, locals, fromlist, level)
-    raise ImportError(
-        f"Import of module '{{name}}' is disallowed in sandbox. "
-        f"Allowed modules: {{sorted(ALLOWED_MODULES)}}"
+    is_blocked_sub = any(
+        b in name for b in ("socket", "subproc", "_posixsubprocess")
     )
+    if top_level in BLOCKED_MODULES or is_blocked_sub:
+        raise ImportError(f"Import of module '{{name}}' is disallowed in sandbox.")
+    return _orig_import(name, globals, locals, fromlist, level)
 
 
 builtins.__import__ = secure_import

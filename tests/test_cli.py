@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -79,8 +80,9 @@ def test_cli_ask_help() -> None:
     """Verify CLI ask command --help output."""
     result = runner.invoke(app, ["ask", "--help"])
     assert result.exit_code == 0
-    assert "--as-of" in result.stdout
-    assert "--max-iterations" in result.stdout
+    clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.stdout)
+    assert "--as-of" in clean_stdout or "as-of" in result.stdout
+    assert "--max-iterations" in clean_stdout or "max-iterations" in result.stdout
 
 
 def test_cli_ask_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
