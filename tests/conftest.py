@@ -1,4 +1,4 @@
-"""Shared fixtures and test registries for specialist isolation tests."""
+"""Shared fixtures and test registries for the test suite."""
 
 import json
 from pathlib import Path
@@ -28,6 +28,7 @@ from lekka_ai.tools.quant import (
     RunReverseDCFTool,
     ScenarioTableTool,
 )
+from lekka_ai.tools.recall_facts import RecallFactsTool
 from lekka_ai.tools.risk import ComputeRiskStatsTool
 from lekka_ai.tools.search_filings import (
     Citation,
@@ -70,7 +71,7 @@ class FixtureSearchFilingsTool(SearchFilingsTool):
 @pytest.fixture
 def fixtures_dir() -> Path:
     """Return path to recorded fixtures directory."""
-    return Path(__file__).parent.parent / "fixtures"
+    return Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -177,5 +178,6 @@ def fixture_tool_registry(
     registry.register(RunPythonTool())
     registry.register(EchoTool())
     registry.register(SubmitAnswerTool())
+    registry.register(RecallFactsTool())
 
     return registry

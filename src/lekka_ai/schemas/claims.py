@@ -118,6 +118,22 @@ class Claim(BaseModel):
         default_factory=list,
         description="List of prerequisite claim IDs for interpretation claims",
     )
+    verdict: str | None = Field(
+        default=None,
+        description="Verification support verdict ('yes', 'no', 'partial')",
+    )
+    verdict_reason: str | None = Field(
+        default=None,
+        description="Explanation or justification for verification verdict",
+    )
+    support_verdict: str | None = Field(
+        default=None,
+        description="Source support verdict ('yes', 'no', 'partial')",
+    )
+    support_reason: str | None = Field(
+        default=None,
+        description="Explanation for source support verdict",
+    )
 
     @field_validator("type", mode="before")
     @classmethod

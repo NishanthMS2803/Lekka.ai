@@ -62,10 +62,14 @@ class Tracer:
         session: Session | None = None,
         session_factory: sessionmaker[Session] | None = None,
         agent_run_id: uuid.UUID | None = None,
+        run_id: str | uuid.UUID | None = None,
+        event_bus: Any | None = None,
     ) -> None:
         self.session = session
         self.session_factory = session_factory
         self.agent_run_id = agent_run_id
+        self.run_id = run_id
+        self.event_bus = event_bus
         self.spans: list[Span] = []
 
     @asynccontextmanager
@@ -120,6 +124,25 @@ class Tracer:
 
             if span_obj.span_type == "tool" or span_obj.tool_name is not None:
                 self._persist_tool_call(span_obj)
+                if self.event_bus and self.run_id:
+                    try:
+                        import asyncio
+
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(
+                            self.event_bus.emit(
+                                str(self.run_id),
+                                "tool_called",
+                                {
+                                    "tool_name": (span_obj.tool_name or span_obj.name),
+                                    "input_json": span_obj.input_json,
+                                    "latency_ms": span_obj.latency_ms,
+                                    "cache_hit": span_obj.cache_hit,
+                                },
+                            )
+                        )
+                    except RuntimeError:
+                        pass
 
     def _persist_tool_call(self, span_obj: Span) -> None:
         """Persist a tool call span to the tool_calls table via the repository."""

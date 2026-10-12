@@ -138,6 +138,47 @@ def factual_accuracy_metric(result: RunResult, example: EvalExample) -> float:
     return grade.score
 
 
+def recovery_rate(result: RunResult, example: EvalExample) -> float:
+    """Measure whether the system gracefully recovered from a fault or error.
+
+    Returns 1.0 if the run recovered without fatal crash (e.g. status in
+    completed, abstained, needs_clarification and no fatal unhandled error).
+    """
+    if result.recovered:
+        return 1.0
+    if result.error:
+        return 0.0
+    if result.status in ("completed", "abstained", "needs_clarification"):
+        return 1.0
+    return 0.0
+
+
+def correct_abstention_rate(result: RunResult, example: EvalExample) -> float:
+    """Measure whether the system made the correct decision regarding abstention.
+
+    Returns 1.0 if the system's abstention decision matches expected_abstain,
+    0.0 otherwise.
+    """
+    expected_abstain = getattr(example, "expected_abstain", None)
+    if expected_abstain is None:
+        if isinstance(example.expected, dict) and "abstain" in example.expected:
+            expected_abstain = bool(example.expected["abstain"])
+        elif example.type in ("unanswerable", "abstain"):
+            expected_abstain = True
+        elif "abstain" in getattr(example, "tags", []):
+            expected_abstain = True
+        else:
+            expected_abstain = False
+
+    is_abstention = result.is_abstention
+    if not is_abstention and result.answer:
+        lower_ans = result.answer.lower()
+        if "insufficient evidence" in lower_ans or "abstained" in lower_ans:
+            is_abstention = True
+
+    return 1.0 if (is_abstention == expected_abstain) else 0.0
+
+
 DEFAULT_METRICS: dict[str, MetricFunc] = {
     "success": success_metric,
     "accuracy": numeric_accuracy_metric,
@@ -146,4 +187,6 @@ DEFAULT_METRICS: dict[str, MetricFunc] = {
     "tool_calls": tool_calls_metric,
     "latency_ms": latency_metric,
     "cost": cost_metric,
+    "recovery_rate": recovery_rate,
+    "correct_abstention_rate": correct_abstention_rate,
 }

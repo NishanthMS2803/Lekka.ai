@@ -27,6 +27,7 @@ market:
   allowed_tools:
     - get_market_data
     - compute_risk_stats
+    - recall_facts
     - submit_answer
   prompt_file: agents/prompts/market.md
   answer_extension_schema: lekka_ai.schemas.market:MarketAnswerExtension
@@ -47,6 +48,7 @@ valuation:
     - compute_multiples
     - scenario_table
     - run_python
+    - recall_facts
     - submit_answer
   prompt_file: agents/prompts/valuation.md
   answer_extension_schema: lekka_ai.schemas.valuation:ValuationAnswerExtension
@@ -62,6 +64,7 @@ news:
     - get_news
     - list_filings
     - search_filings
+    - recall_facts
     - submit_answer
   prompt_file: agents/prompts/news.md
   answer_extension_schema: lekka_ai.schemas.news:NewsAnswerExtension
@@ -71,3 +74,40 @@ news:
     max_seconds: 90.0
     max_tool_calls: 10
     max_repair_attempts: 3
+
+fundamental:
+  allowed_tools:
+    - get_financials
+    - list_filings
+    - search_filings
+    - get_analyst_estimates
+    - get_industry_data
+    - recall_facts
+    - submit_answer
+  prompt_file: agents/prompts/fundamental.md
+  answer_extension_schema: null
+  default_limits:
+    max_iterations: 10
+    max_tokens: 150000
+    max_seconds: 120.0
+    max_tool_calls: 15
+    max_repair_attempts: 3
+
+risk:
+  allowed_tools:
+    - get_market_data
+    - get_financials
+    - search_filings
+    - get_news
+    - get_industry_data
+    - compute_risk_stats
+    - submit_answer
+  prompt_file: agents/prompts/risk.md
+  answer_extension_schema: lekka_ai.schemas.risk:RiskAnswerExtension
+  default_limits:
+    max_iterations: 10
+    max_tokens: 150000
+    max_seconds: 120.0
+    max_tool_calls: 15
+    max_repair_attempts: 3
+

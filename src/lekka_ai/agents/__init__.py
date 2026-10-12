@@ -2,6 +2,10 @@
 
 from lekka_ai.harness.permissions import AgentProfile
 from lekka_ai.harness.profiles import (
+    FUNDAMENTAL_PROFILE,
+    RISK_PROFILE,
+    create_fundamental_profile,
+    create_risk_profile,
     find_profiles_yaml,
     load_agent_profile,
     load_profiles,
@@ -12,6 +16,10 @@ from lekka_ai.harness.profiles import (
 
 __all__ = [
     "AgentProfile",
+    "FUNDAMENTAL_PROFILE",
+    "RISK_PROFILE",
+    "create_fundamental_profile",
+    "create_risk_profile",
     "find_profiles_yaml",
     "load_agent_profile",
     "load_profiles",

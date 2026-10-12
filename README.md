@@ -139,6 +139,167 @@ Lekka AI features an enterprise agent execution and safety harness (`src/lekka_a
 
 ---
 
+## Multi-Agent Orchestration Architecture
+
+Lekka AI coordinates multiple specialist agents in a closed-loop research pipeline that strictly enforces evidence grounding, conflict reconciliation, deterministic confidence scoring, and anti-hallucination checks.
+
+```mermaid
+flowchart TD
+    User([User Request / API POST /runs]) --> Understand[1. Query Understanding<br/>Intent, Ticker, Ambiguity Check]
+    Understand -->|Ambiguous| Clarify([Halt / Demand Clarification])
+    Understand -->|Clear| Planner[2. Dynamic Planner<br/>DAG & Task Decomposition]
+    Planner --> Dispatcher[3. Task Dispatcher<br/>Parallel Specialist Execution]
+    
+    subgraph Specialists [Autonomous Specialist Agents]
+        Fundamental[Fundamental Specialist<br/>SEC Filings, Financials]
+        Valuation[Valuation Specialist<br/>DCF, Reverse DCF, Multiples]
+        Market[Market Specialist<br/>Price Action, Volatility, Beta]
+        News[News Specialist<br/>Catalysts, 8-Ks, Untrusted]
+    end
+    
+    Dispatcher --> Fundamental
+    Dispatcher --> Valuation
+    Dispatcher --> Market
+    Dispatcher --> News
+    
+    Fundamental --> Ledger[(4. Shared Claim Ledger<br/>Grounded Claims & Evidence)]
+    Valuation --> Ledger
+    Market --> Ledger
+    News --> Ledger
+    
+    Ledger --> Verifier[5. Verification & Conflict Detection<br/>Cross-Source Audit]
+    Verifier --> GapCheck{6. Gap Check<br/>Sufficient Evidence?}
+    GapCheck -->|Gaps Found| Planner
+    GapCheck -->|Complete| Confidence[7. Deterministic Confidence Scoring<br/>6 Stated Methodology Rules]
+    
+    Confidence -->|< 0.60 Threshold| Abstention([Abstention Report<br/>Lists Missing Evidence, No Numbers])
+    Confidence -->|>= 0.60 Threshold| Synthesizer[8. Parent Report Synthesizer<br/>Strict Ledger Citations & Post-Check]
+    
+    Synthesizer --> FinalReport([Final Equity Research Report<br/>Markdown & Sentence-Claim Map])
+    
+    subgraph Observability [Real-Time Observability & Harness]
+        EventBus[Event Bus & SSE Stream<br/>GET /runs/{id}/events]
+        Tracer[Telemetry & OpenTelemetry Spans<br/>GET /runs/{id}/trace]
+        FaultHarness[Fault Injection Harness<br/>Timeouts, Outages, Injections]
+    end
+    
+    Dispatcher -.-> EventBus
+    Synthesizer -.-> EventBus
+    Dispatcher -.-> Tracer
+    Specialists -.-> FaultHarness
+```
+
+### Orchestration Pipeline Stages
+
+1. **Query Understanding (`understand_query`)**:
+   Classifies query intent (`investment_evaluation`, `valuation_check`, `move_explanation`, `risk_review`), extracts target stock tickers, and verifies clarity. Questions lacking entities or clear mandates immediately flag `needs_clarification`, halting before ungrounded tasks execute.
+2. **Dynamic Planning (`Planner`)**:
+   Decomposes mandates into parallel specialist task graphs with explicit dependencies, role assignments, and priority ordering.
+3. **Task Dispatcher & Concurrency (`TaskDispatcher`)**:
+   Executes tasks asynchronously across specialist workers within token caps, runtime budgets, and iteration boundaries.
+4. **Shared Claim Ledger**:
+   Stores verifiable claims (`fact`, `calculation`, `interpretation`, `background`) linked to underlying `Evidence` objects and tool execution references.
+5. **Conflict Detection & Reconciliation**:
+   Compares claims across agents to flag discrepancies (e.g. conflicting revenue numbers between 10-K filings and news summaries).
+6. **Gap Check & Iterative Follow-Up (`GapChecker`)**:
+   Evaluates ledger completeness against the research mandate, spawning follow-up tasks if key valuation or financial inputs are missing.
+7. **Deterministic Confidence Scoring (`calculate_confidence`)**:
+   Computes a deterministic score (0.0 to 1.0) derived from 6 stated rules: share of verified facts, unresolved conflict penalty (-0.15 each), evidence recency, background narrative share, agent role coverage, and hit runtime limits. Runs below threshold (< 0.60) route directly to the abstention path.
+8. **Parent Report Synthesizer (`synthesize_report`)**:
+   Constructs the 9-section equity research report strictly from cited claims. Every sentence must cite supporting claim IDs `[claim_id]`. A deterministic post-check rejects any sentence containing numbers not present in the cited claims, triggering automated regeneration (up to 2 retries).
+
+---
+
+## REST & Streaming API Reference
+
+Lekka AI provides a high-performance FastAPI service for starting asynchronous multi-agent research runs, streaming real-time event updates, and retrieving audit claims and synthesized reports.
+
+### Endpoints Overview
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/runs` | Launch a multi-agent research run in a background task. Returns `run_id`. |
+| `GET` | `/runs/{run_id}` | Poll current execution status, progress, and run outcome. |
+| `GET` | `/runs/{run_id}/report` | Retrieve the final synthesized equity research report or abstention report. |
+| `GET` | `/runs/{run_id}/claims` | Retrieve all verified claims produced in the ledger during the run. |
+| `GET` | `/claims/{claim_id}` | Inspect a single claim by ID with full evidence provenance and raw tool values. |
+| `GET` | `/runs/{run_id}/events` | Stream real-time run lifecycle events via Server-Sent Events (SSE). |
+| `GET` | `/runs/{run_id}/trace` | Retrieve execution telemetry, hierarchical spans, latency, and estimated cost. |
+
+### API Usage Examples
+
+#### 1. Launch a Research Run
+```bash
+curl -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Evaluate AAPL valuation and business quality as of Q3 2024",
+    "as_of_date": "2024-09-20",
+    "budget": {"max_tokens": 50000, "max_cost_usd": 1.00}
+  }'
+```
+Response:
+```json
+{
+  "run_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "status": "running"
+}
+```
+
+#### 2. Stream Live Execution Events (SSE)
+```bash
+curl -N http://localhost:8000/runs/7c9e6679-7425-40de-944b-e07fc1f90ae7/events
+```
+Stream emissions:
+```text
+event: run_started
+data: {"event_type":"run_started","run_id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","payload":{"question":"Evaluate AAPL..."}}
+
+event: plan_created
+data: {"event_type":"plan_created","run_id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","payload":{"task_count":3}}
+
+event: task_started
+data: {"event_type":"task_started","run_id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","payload":{"task_id":"task_fund_01","agent_type":"fundamental"}}
+
+event: report_ready
+data: {"event_type":"report_ready","run_id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","payload":{"confidence_score":0.85}}
+```
+
+#### 3. Retrieve Synthesized Report
+```bash
+curl http://localhost:8000/runs/7c9e6679-7425-40de-944b-e07fc1f90ae7/report
+```
+Response:
+```json
+{
+  "run_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "status": "completed",
+  "markdown": "## Executive Summary\nApple generated $85.8B revenue [claim_fund_01]...",
+  "confidence_score": 0.85,
+  "is_abstention": false,
+  "sentence_to_claims": {
+    "Apple generated $85.8B revenue [claim_fund_01]...": ["claim_fund_01"]
+  }
+}
+```
+
+#### 4. Inspect Execution Trace & Dollar Costs
+```bash
+curl http://localhost:8000/runs/7c9e6679-7425-40de-944b-e07fc1f90ae7/trace
+```
+Response:
+```json
+{
+  "run_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "spans": [...],
+  "total_tokens": 12450,
+  "total_cost_usd": 0.0037,
+  "duration_seconds": 4.12
+}
+```
+
+---
+
 ## Command Line Interface (CLI)
 
 Lekka AI includes a Typer-powered CLI (`lekka-ai ask`) for interactive research queries:

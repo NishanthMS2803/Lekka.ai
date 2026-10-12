@@ -156,6 +156,35 @@ class ToolCache(Base):
     )
 
 
+class FactCache(Base):
+    """Lite memory fact cache storing verified claims with fact-based TTL."""
+
+    __tablename__ = "facts_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    metric_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    value: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fact_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    as_of_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    claim_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    period: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_facts_cache_ticker_metric", "ticker", "metric_key"),)
+
+
 class Filing(Base):
     """Parsed SEC filing document section with raw and cleaned text."""
 

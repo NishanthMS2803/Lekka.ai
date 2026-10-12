@@ -13,6 +13,16 @@ from lekka_ai.harness.errors import (
     format_tool_error,
     is_retryable_tool_error,
 )
+from lekka_ai.harness.faults import (
+    FaultPlan,
+    FaultRule,
+    FaultType,
+    HTTP500Error,
+    RunConfig,
+    active_fault_plan,
+    apply_fault_plan_to_tool,
+    get_current_fault_plan,
+)
 from lekka_ai.harness.models import (
     AgentTask,
     Budget,
@@ -44,6 +54,11 @@ from lekka_ai.harness.runtime import (
     AgentRunResult,
     AgentRuntime,
 )
+from lekka_ai.harness.scheduler import (
+    TaskRunnerCallable,
+    TaskScheduler,
+    run_ready_tasks_parallel,
+)
 from lekka_ai.harness.untrusted import (
     UNTRUSTED_DATA_PROMPT_SNIPPET,
     UNTRUSTED_DATA_SYSTEM_PROMPT,
@@ -67,6 +82,10 @@ __all__ = [
     "BudgetExhaustedError",
     "DirectLLMRunner",
     "ExtractedNumericClaims",
+    "FaultPlan",
+    "FaultRule",
+    "FaultType",
+    "HTTP500Error",
     "Limits",
     "MARKET_PROFILE",
     "NEWS_PROFILE",
@@ -74,9 +93,14 @@ __all__ = [
     "PermissionDenied",
     "RepeatedToolCallError",
     "RetryableToolError",
+    "RunConfig",
+    "TaskRunnerCallable",
+    "TaskScheduler",
     "ToolError",
     "ToolView",
     "VALUATION_PROFILE",
+    "active_fault_plan",
+    "apply_fault_plan_to_tool",
     "canonicalize_tool_args",
     "create_analyst_profile",
     "create_market_profile",
@@ -87,10 +111,12 @@ __all__ = [
     "find_profiles_yaml",
     "format_tool_error",
     "get_analyst_tools",
+    "get_current_fault_plan",
     "is_retryable_tool_error",
     "load_agent_profile",
     "load_profiles",
     "load_profiles_from_dict",
+    "run_ready_tasks_parallel",
     "validate_profile_tools",
     "wrap_tool_output",
     "wrap_untrusted_content",

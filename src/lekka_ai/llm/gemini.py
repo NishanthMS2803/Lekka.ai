@@ -219,11 +219,12 @@ class GeminiClient(LLMClient):
 
         candidate_models = [
             self.model,
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-flash-latest",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
             "gemini-flash-lite-latest",
-            "gemini-3.1-flash-lite",
         ]
         # Deduplicate while preserving order
         models_to_try = list(dict.fromkeys(candidate_models))
@@ -241,6 +242,7 @@ class GeminiClient(LLMClient):
                 self.model = m_name
                 break
             except Exception as exc:
+                last_exc = exc
                 exc_str = str(exc).lower()
                 if (
                     "quota" in exc_str
@@ -251,8 +253,9 @@ class GeminiClient(LLMClient):
                         "Gemini model quota reached, falling back to next model",
                         exhausted_model=m_name,
                     )
-                    last_exc = exc
                     continue
+                # For non-quota errors, don't silently loop through unrelated models
+                raise exc
         if response is None:
             if last_exc:
                 raise last_exc

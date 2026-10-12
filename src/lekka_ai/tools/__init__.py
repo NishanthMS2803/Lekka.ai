@@ -63,6 +63,13 @@ from lekka_ai.tools.quant import (
     ScenarioTableOutput,
     ScenarioTableTool,
 )
+from lekka_ai.tools.recall_facts import (
+    RecalledFact,
+    RecallFactsInput,
+    RecallFactsOutput,
+    RecallFactsTool,
+    default_recall_facts_tool,
+)
 from lekka_ai.tools.risk import (
     ComputeRiskStatsInput,
     ComputeRiskStatsOutput,
@@ -125,6 +132,10 @@ __all__ = [
     "NewsItem",
     "NewsTool",
     "Passage",
+    "RecallFactsInput",
+    "RecallFactsOutput",
+    "RecallFactsTool",
+    "RecalledFact",
     "RiskStatsTool",
     "RunDCFInput",
     "RunDCFOutput",
@@ -148,5 +159,6 @@ __all__ = [
     "ToolRegistry",
     "build_cache_key",
     "cached_tool",
+    "default_recall_facts_tool",
     "default_registry",
 ]
