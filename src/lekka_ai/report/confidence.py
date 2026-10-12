@@ -464,6 +464,7 @@ async def synthesize_report_with_confidence(
     state: RunState | None = None,
     threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     llm_client: LLMClient | None = None,
+    llm: LLMClient | None = None,
     model_name: str | None = None,
     max_retries: int = 2,
     anchor_date: date | str | None = None,
@@ -473,6 +474,7 @@ async def synthesize_report_with_confidence(
     If confidence is below threshold or evidence is missing, emits an abstention
     report stating 'insufficient evidence' and giving no scenario numbers.
     """
+    effective_llm = llm_client or llm
     breakdown = calculate_confidence(
         claims,
         state=state,
@@ -508,7 +510,7 @@ async def synthesize_report_with_confidence(
         claims=claims,
         ticker=ticker,
         question=question,
-        llm_client=llm_client,
+        llm_client=effective_llm,
         model_name=model_name,
         max_retries=max_retries,
     )
