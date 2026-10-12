@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lekka_ai.harness.errors import is_retryable_tool_error
 from lekka_ai.logging import get_logger
 from lekka_ai.tracing import Tracer
 
@@ -104,6 +106,8 @@ class ToolView:
         *,
         tracer: Tracer | None = None,
         agent_run_id: uuid.UUID | None = None,
+        max_retries: int = 2,
+        backoff_factor: float = 0.05,
     ) -> None:
         self.registry = registry
         if isinstance(profile, AgentProfile):
@@ -115,6 +119,8 @@ class ToolView:
             )
         self.tracer = tracer or Tracer(agent_run_id=agent_run_id)
         self.agent_run_id = agent_run_id
+        self.max_retries = max_retries
+        self.backoff_factor = backoff_factor
 
     def is_allowed(self, tool_name: str) -> bool:
         """Verify if a tool is permitted under current agent profile."""
@@ -196,18 +202,38 @@ class ToolView:
             agent_run_id=self.agent_run_id,
             input_json=payload,
         ) as span_obj:
-            if hasattr(tool, "execute"):
-                result = await tool.execute(input_data)
-            else:
-                result = await tool(input_data)
-            span_obj.output_json = (
-                result.model_dump()
-                if hasattr(result, "model_dump")
-                else result
-                if isinstance(result, (dict, list))
-                else {"result": str(result)}
-            )
-            return result
+            last_exc: Exception | None = None
+            for attempt in range(self.max_retries + 1):
+                try:
+                    if hasattr(tool, "execute"):
+                        result = await tool.execute(input_data)
+                    else:
+                        result = await tool(input_data)
+                    span_obj.output_json = (
+                        result.model_dump()
+                        if hasattr(result, "model_dump")
+                        else result
+                        if isinstance(result, (dict, list))
+                        else {"result": str(result)}
+                    )
+                    return result
+                except Exception as exc:
+                    last_exc = exc
+                    if is_retryable_tool_error(exc) and attempt < self.max_retries:
+                        backoff = self.backoff_factor * (2**attempt)
+                        logger.warning(
+                            "Tool execution failed with retryable error, retrying",
+                            tool_name=clean_name,
+                            attempt=attempt + 1,
+                            max_retries=self.max_retries,
+                            backoff=backoff,
+                            error=str(exc),
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    raise
+            if last_exc is not None:
+                raise last_exc
 
     async def call(self, tool_name: str, input_data: Any) -> Any:
         """Alias for execute()."""

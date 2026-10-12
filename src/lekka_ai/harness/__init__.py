@@ -1,5 +1,13 @@
 """Agent harness data contracts, execution engine, and limits."""
 
+from lekka_ai.harness.errors import (
+    RepeatedToolCallError,
+    RetryableToolError,
+    ToolError,
+    canonicalize_tool_args,
+    format_tool_error,
+    is_retryable_tool_error,
+)
 from lekka_ai.harness.models import (
     AgentTask,
     Budget,
@@ -37,9 +45,15 @@ __all__ = [
     "BudgetExhaustedError",
     "Limits",
     "PermissionDenied",
+    "RepeatedToolCallError",
+    "RetryableToolError",
+    "ToolError",
     "ToolView",
+    "canonicalize_tool_args",
     "escape_untrusted_content",
     "extract_untrusted_blocks",
+    "format_tool_error",
+    "is_retryable_tool_error",
     "wrap_tool_output",
     "wrap_untrusted_content",
 ]

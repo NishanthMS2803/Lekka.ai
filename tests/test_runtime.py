@@ -22,6 +22,7 @@ from lekka_ai.harness import (
     Limits,
     ToolView,
 )
+from lekka_ai.harness.errors import RetryableToolError
 from lekka_ai.llm.base import LLMResponse, ToolCall, Usage
 from lekka_ai.llm.fake import FakeLLM
 from lekka_ai.schemas.submit import AnswerStatus
@@ -103,13 +104,99 @@ class SlowTool(Tool[SlowInput, SlowOutput]):
         return SlowOutput(elapsed=input_data.delay)
 
 
+class FailingInput(BaseModel):
+    """Input payload for FailingTool."""
+
+    message: str = Field(default="", description="Input message")
+
+
+class FailingOutput(BaseModel):
+    """Output payload for FailingTool."""
+
+    result: str = Field(default="", description="Output result")
+
+
+class FailingTool(Tool[FailingInput, FailingOutput]):
+    """Tool that always raises non-retryable ValueError."""
+
+    name = "failing_tool"
+    description = "Always raises a non-retryable ValueError"
+    input_model = FailingInput
+    output_model = FailingOutput
+
+    async def run(self, input_data: FailingInput) -> FailingOutput:
+        raise ValueError("Invalid operation: forbidden")
+
+
+class FlakyInput(BaseModel):
+    """Input payload for FlakyTool."""
+
+    query: str = Field(default="", description="Query string")
+
+
+class FlakyOutput(BaseModel):
+    """Output payload for FlakyTool."""
+
+    status: str = Field(..., description="Execution status")
+    attempts: int = Field(..., description="Attempts taken")
+
+
+class FlakyTool(Tool[FlakyInput, FlakyOutput]):
+    """Tool that fails once with RetryableToolError then succeeds."""
+
+    name = "flaky_tool"
+    description = "Fails once with RetryableToolError then succeeds"
+    input_model = FlakyInput
+    output_model = FlakyOutput
+
+    def __init__(self) -> None:
+        self.call_count: int = 0
+
+    async def run(self, input_data: FlakyInput) -> FlakyOutput:
+        self.call_count += 1
+        if self.call_count == 1:
+            raise RetryableToolError("Transient flaky error on attempt 1")
+        return FlakyOutput(status="recovered", attempts=self.call_count)
+
+
+class AlwaysRetryableInput(BaseModel):
+    """Input payload for AlwaysRetryableFailingTool."""
+
+    query: str = Field(default="", description="Query")
+
+
+class AlwaysRetryableOutput(BaseModel):
+    """Output payload for AlwaysRetryableFailingTool."""
+
+    result: str = Field(default="", description="Result")
+
+
+class AlwaysRetryableFailingTool(Tool[AlwaysRetryableInput, AlwaysRetryableOutput]):
+    """Tool that always raises RetryableToolError."""
+
+    name = "always_retryable_tool"
+    description = "Always raises RetryableToolError"
+    input_model = AlwaysRetryableInput
+    output_model = AlwaysRetryableOutput
+
+    def __init__(self) -> None:
+        self.call_count: int = 0
+
+    async def run(self, input_data: AlwaysRetryableInput) -> AlwaysRetryableOutput:
+        self.call_count += 1
+        raise RetryableToolError("Upstream timeout error")
+
+
 @pytest.fixture
 def registry() -> ToolRegistry:
-    """Fixture providing a test registry with EchoTool, AddTool, and SlowTool."""
+    """Fixture providing a test registry with test tools."""
     reg = ToolRegistry()
     reg.register(EchoTool())
     reg.register(AddTool())
     reg.register(SlowTool())
+    reg.register(FailingTool())
+    reg.register(FlakyTool())
+    reg.register(AlwaysRetryableFailingTool())
     return reg
 
 
@@ -1186,3 +1273,325 @@ async def test_runtime_limit_hard_stop_when_agent_refuses_to_submit(
     assert result.submission is None
     assert "max_tool_calls" in result.limits_hit
     assert "I refuse to call submit_answer." in (result.final_text or "")
+
+
+@pytest.mark.asyncio
+async def test_repeat_detection_interrupts_identical_tool_calls_on_3rd_time(
+    registry: ToolRegistry,
+) -> None:
+    """Verify repeated identical tool call is interrupted on 3rd attempt."""
+    task = AgentTask(
+        task_id="task_repeat_01",
+        agent_type="analyst",
+        instruction="Check repeat detection",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    # Agent calls echo_tool with identical message 3 times in consecutive turns
+    call_1 = LLMResponse(
+        text="Call 1",
+        tool_calls=[
+            ToolCall(id="tc_rep_1", name="echo_tool", args={"message": "same_arg"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_2 = LLMResponse(
+        text="Call 2",
+        tool_calls=[
+            ToolCall(id="tc_rep_2", name="echo_tool", args={"message": "same_arg"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_3 = LLMResponse(
+        text="Call 3 identical",
+        tool_calls=[
+            ToolCall(id="tc_rep_3", name="echo_tool", args={"message": "same_arg"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    # Turn 4: Agent sees interruption message, changes approach and submits
+    call_4 = LLMResponse(
+        text="Changing approach as requested",
+        tool_calls=[
+            ToolCall(
+                id="tc_rep_sub",
+                name="submit_answer",
+                args={
+                    "task_id": "task_repeat_01",
+                    "agent_type": "analyst",
+                    "status": "partial",
+                    "claims": [],
+                    "confidence": 0.5,
+                    "confidence_rationale": "Changed approach after repeat alert",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3, call_4])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+    )
+
+    assert result.status == "partial"
+    assert result.submission is not None
+
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    assert len(tool_messages) >= 3
+
+    third_tool_msg = tool_messages[2].content
+    assert "Repeated identical tool call detected" in third_tool_msg
+    assert "change your approach" in third_tool_msg.lower()
+    assert "echo_tool" in third_tool_msg
+
+
+@pytest.mark.asyncio
+async def test_repeat_detection_allows_distinct_args(
+    registry: ToolRegistry,
+) -> None:
+    """Verify distinct tool call arguments are not interrupted."""
+    task = AgentTask(
+        task_id="task_distinct_01",
+        agent_type="analyst",
+        instruction="Check distinct args",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["echo_tool"])
+    tool_view = ToolView(registry, profile)
+
+    call_1 = LLMResponse(
+        text="Call with arg1",
+        tool_calls=[
+            ToolCall(id="tc_dist_1", name="echo_tool", args={"message": "arg1"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_2 = LLMResponse(
+        text="Call with arg2",
+        tool_calls=[
+            ToolCall(id="tc_dist_2", name="echo_tool", args={"message": "arg2"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_3 = LLMResponse(
+        text="Call with arg3",
+        tool_calls=[
+            ToolCall(id="tc_dist_3", name="echo_tool", args={"message": "arg3"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    call_4 = LLMResponse(
+        text="Final answer",
+        tool_calls=[],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[call_1, call_2, call_3, call_4])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+    )
+
+    assert result.status == "completed"
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    assert len(tool_messages) == 3
+    for tm in tool_messages:
+        assert "Repeated identical tool call" not in tm.content
+
+
+@pytest.mark.asyncio
+async def test_tool_non_retryable_error_converted_to_structured_observation(
+    registry: ToolRegistry,
+) -> None:
+    """Verify non-retryable tool exception converts to structured observation."""
+    task = AgentTask(
+        task_id="task_err_01",
+        agent_type="analyst",
+        instruction="Check non-retryable error handling",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["failing_tool"])
+    tool_view = ToolView(registry, profile)
+
+    step_1 = LLMResponse(
+        text="Calling failing tool",
+        tool_calls=[
+            ToolCall(id="tc_fail_1", name="failing_tool", args={"message": "test"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    step_2 = LLMResponse(
+        text="Handling error and submitting answer",
+        tool_calls=[
+            ToolCall(
+                id="tc_fail_sub",
+                name="submit_answer",
+                args={
+                    "task_id": "task_err_01",
+                    "agent_type": "analyst",
+                    "status": "insufficient_evidence",
+                    "claims": [],
+                    "confidence": 0.2,
+                    "confidence_rationale": "Tool failed with non-retryable error",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, step_2])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+    )
+
+    assert result.status == "insufficient_evidence"
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    assert len(tool_messages) == 2
+
+    fail_tool_msg = tool_messages[0].content
+    assert "ValueError" in fail_tool_msg
+    assert "Invalid operation: forbidden" in fail_tool_msg
+    assert '"retryable": false' in fail_tool_msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_retryable_error_retried_with_backoff_and_succeeds(
+    registry: ToolRegistry,
+) -> None:
+    """Verify retryable error is retried with backoff and succeeds on retry."""
+    task = AgentTask(
+        task_id="task_flaky_01",
+        agent_type="analyst",
+        instruction="Check flaky tool retry",
+    )
+    profile = AgentProfile(agent_type="analyst", allowed_tools=["flaky_tool"])
+    flaky_tool = FlakyTool()
+    registry.register(flaky_tool, overwrite=True)
+
+    tool_view = ToolView(
+        registry,
+        profile,
+        max_retries=2,
+        backoff_factor=0.01,
+    )
+
+    step_1 = LLMResponse(
+        text="Calling flaky tool",
+        tool_calls=[
+            ToolCall(id="tc_flaky_1", name="flaky_tool", args={"query": "retry_me"})
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    step_2 = LLMResponse(
+        text="Submitting after successful retry",
+        tool_calls=[
+            ToolCall(
+                id="tc_flaky_sub",
+                name="submit_answer",
+                args={
+                    "task_id": "task_flaky_01",
+                    "agent_type": "analyst",
+                    "status": "partial",
+                    "claims": [],
+                    "confidence": 0.7,
+                    "confidence_rationale": "Succeeded on retry",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, step_2])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+    )
+
+    assert result.status == "partial"
+    assert flaky_tool.call_count == 2
+
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    assert "recovered" in tool_messages[0].content
+    assert '"error": true' not in tool_messages[0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_retryable_error_exhausted_converted_to_structured_observation(
+    registry: ToolRegistry,
+) -> None:
+    """Verify retryable error converts to observation when retries exhausted."""
+    task = AgentTask(
+        task_id="task_exhaust_01",
+        agent_type="analyst",
+        instruction="Check exhausted retryable error",
+    )
+    profile = AgentProfile(
+        agent_type="analyst",
+        allowed_tools=["always_retryable_tool"],
+    )
+    always_failing = AlwaysRetryableFailingTool()
+    registry.register(always_failing, overwrite=True)
+
+    tool_view = ToolView(
+        registry,
+        profile,
+        max_retries=2,
+        backoff_factor=0.01,
+    )
+
+    step_1 = LLMResponse(
+        text="Calling always failing retryable tool",
+        tool_calls=[
+            ToolCall(
+                id="tc_alw_1",
+                name="always_retryable_tool",
+                args={"query": "will_fail"},
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+    step_2 = LLMResponse(
+        text="Handling exhausted error",
+        tool_calls=[
+            ToolCall(
+                id="tc_alw_sub",
+                name="submit_answer",
+                args={
+                    "task_id": "task_exhaust_01",
+                    "agent_type": "analyst",
+                    "status": "insufficient_evidence",
+                    "claims": [],
+                    "confidence": 0.1,
+                    "confidence_rationale": "Service unavailable after retries",
+                },
+            )
+        ],
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+    fake_llm = FakeLLM(responses=[step_1, step_2])
+    result = await AgentRuntime.run(
+        task=task,
+        profile=profile,
+        llm=fake_llm,
+        tool_view=tool_view,
+    )
+
+    assert result.status == "insufficient_evidence"
+    assert always_failing.call_count == 3
+
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    obs_content = tool_messages[0].content
+    assert "RetryableToolError" in obs_content
+    assert "Upstream timeout error" in obs_content
+    assert '"retryable": true' in obs_content.lower()

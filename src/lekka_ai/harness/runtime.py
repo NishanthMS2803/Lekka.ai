@@ -10,6 +10,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, ValidationError
 
+from lekka_ai.harness.errors import (
+    canonicalize_tool_args,
+    is_retryable_tool_error,
+)
 from lekka_ai.harness.untrusted import (
     UNTRUSTED_DATA_SYSTEM_PROMPT,
     wrap_tool_output,
@@ -103,6 +107,7 @@ class AgentRuntime:
         max_repair_attempts: int = 3,
         session: Session | None = None,
         ledger: LedgerRepository | None = None,
+        repeat_threshold: int = 3,
     ) -> AgentRunResult:
         """Execute an agent task through the runtime loop."""
         runtime = cls(session=session, ledger=ledger)
@@ -113,6 +118,7 @@ class AgentRuntime:
             tool_view,
             limits,
             max_repair_attempts=max_repair_attempts,
+            repeat_threshold=repeat_threshold,
         )
 
     async def execute(
@@ -124,6 +130,7 @@ class AgentRuntime:
         limits: Limits | None = None,
         *,
         max_repair_attempts: int = 3,
+        repeat_threshold: int = 3,
     ) -> AgentRunResult:
         """Run inner loop: build prompt, call LLM, invoke tools, and log run row."""
         # Ensure built-in submit_answer tool is registered
@@ -163,6 +170,7 @@ class AgentRuntime:
         tokens_out = 0
         tool_calls_count = 0
         repair_attempts = 0
+        tool_call_counts: dict[tuple[str, str], int] = {}
         limits_hit: list[str] = []
         final_text: str | None = None
         status = "running"
@@ -347,6 +355,47 @@ class AgentRuntime:
                             )
                             break
 
+                # Repeat detection: same tool + same args, 3rd time
+                call_key = (tc.name, canonicalize_tool_args(tc.args))
+                tool_call_counts[call_key] = tool_call_counts.get(call_key, 0) + 1
+                if tool_call_counts[call_key] >= repeat_threshold:
+                    interruption_msg = (
+                        f"Repeated identical tool call detected: tool '{tc.name}' "
+                        f"has been called {tool_call_counts[call_key]} times with "
+                        "identical arguments. You must change your approach or "
+                        "adjust your parameters."
+                    )
+                    logger.warning(
+                        "Repeated identical tool call interrupted",
+                        tool_name=tc.name,
+                        repeat_count=tool_call_counts[call_key],
+                    )
+                    tool_output = {
+                        "error": True,
+                        "error_type": "RepeatedToolCallError",
+                        "message": interruption_msg,
+                        "retryable": False,
+                    }
+                    async with tool_view.tracer.span(
+                        tc.name,
+                        span_type="tool",
+                        tool_name=tc.name,
+                        agent_run_id=tool_view.agent_run_id,
+                        input_json=tc.args if isinstance(tc.args, dict) else {},
+                    ) as rep_span:
+                        rep_span.status = "error"
+                        rep_span.error = interruption_msg
+                        rep_span.output_json = tool_output
+
+                    formatted_output = wrap_tool_output(tc.name, tool_output)
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=formatted_output,
+                        )
+                    )
+                    continue
+
                 try:
                     tool_output = await tool_view.execute(tc.name, tc.args)
                     executed_tool_call_ids.add(str(tc.id).strip())
@@ -359,12 +408,19 @@ class AgentRuntime:
                                 latest_span.tool_call_id
                             )
                 except Exception as exc:
+                    is_retryable = is_retryable_tool_error(exc)
                     logger.warning(
                         "Tool execution error in runtime",
                         tool_name=tc.name,
                         error=str(exc),
+                        retryable=is_retryable,
                     )
-                    tool_output = {"error": str(exc)}
+                    tool_output = {
+                        "error": True,
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                        "retryable": is_retryable,
+                    }
 
                 # Delimit and wrap external tool outputs
                 formatted_output = wrap_tool_output(tc.name, tool_output)
