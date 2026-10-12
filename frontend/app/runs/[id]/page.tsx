@@ -8,6 +8,7 @@ import {
   RunStatusResponse,
   RunReportResponse,
   RunTraceResponse,
+  ClaimResponse,
   createRunEventSource,
   RunEventPayload,
 } from "@/lib/api";
@@ -18,6 +19,83 @@ import {
   AgentTaskItem,
 } from "@/components/StageChecklist";
 import { AbstentionBanner } from "@/components/AbstentionBanner";
+import { InteractiveReport } from "@/components/InteractiveReport";
+import { ClaimDrillDownPanel } from "@/components/ClaimDrillDownPanel";
+import { ScenarioChart, ScenarioDataPoint } from "@/components/ScenarioChart";
+import { RisksTable, RiskItem } from "@/components/RisksTable";
+
+function extractScenarioData(statusData: RunStatusResponse | null): ScenarioDataPoint[] {
+  const outcome = statusData?.outcome as Record<string, unknown> | undefined;
+  const state = outcome?.state as Record<string, unknown> | undefined;
+  const results = state?.results as Array<Record<string, unknown>> | undefined;
+
+  if (results && Array.isArray(results)) {
+    for (const res of results) {
+      const ext = res.extensions as Record<string, unknown> | undefined;
+      if (ext && ext.valuation) {
+        const valExt = ext.valuation as Record<string, unknown>;
+        const sv = valExt.scenario_values as Record<string, unknown> | undefined;
+        if (
+          sv &&
+          typeof sv.bear === "number" &&
+          typeof sv.base === "number" &&
+          typeof sv.bull === "number"
+        ) {
+          return [
+            { scenario: "Bear Case", value: sv.bear, notes: "Macro headwinds & margin compression" },
+            { scenario: "Base Case", value: sv.base, notes: "Consensus DCF fundamental expectation" },
+            { scenario: "Bull Case", value: sv.bull, notes: "Multiple expansion & margin upside" },
+          ];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+function extractRisksData(statusData: RunStatusResponse | null): RiskItem[] {
+  const outcome = statusData?.outcome as Record<string, unknown> | undefined;
+  const state = outcome?.state as Record<string, unknown> | undefined;
+  const results = state?.results as Array<Record<string, unknown>> | undefined;
+
+  if (results && Array.isArray(results)) {
+    for (const res of results) {
+      const ext = res.extensions as Record<string, unknown> | undefined;
+      if (ext && ext.risk) {
+        const riskExt = ext.risk as Record<string, unknown>;
+        const ranked = (riskExt.ranked_risks || riskExt.risks) as
+          | Array<Record<string, unknown>>
+          | undefined;
+        if (ranked && Array.isArray(ranked) && ranked.length > 0) {
+          return ranked.map((r, i) => ({
+            rank: (r.rank as number) || i + 1,
+            riskFactor: (r.risk_factor || r.title || r.name || "Risk Factor") as string,
+            severity: (r.severity as string) || "medium",
+            failureMode: (r.failure_mode as string) || null,
+            potentialDrawdown: (r.potential_drawdown as string | number) || null,
+            evidenceClaimIds: (r.evidence_claim_ids as string[]) || [],
+            description: (r.description as string) || null,
+          }));
+        }
+      }
+    }
+  }
+  return [];
+}
+
+function getPrimaryTicker(stages: StageDetails, statusData: RunStatusResponse | null): string {
+  if (stages.understanding.tickers?.[0]) {
+    return stages.understanding.tickers[0];
+  }
+  const outcome = statusData?.outcome as Record<string, unknown> | undefined;
+  const state = outcome?.state as Record<string, unknown> | undefined;
+  const parsed = state?.parsed_query as Record<string, unknown> | undefined;
+  const tickers = parsed?.tickers as string[] | undefined;
+  if (tickers && tickers.length > 0) {
+    return tickers[0];
+  }
+  return "AAPL";
+}
 
 function RunDetailContent() {
   const params = useParams();
@@ -28,8 +106,15 @@ function RunDetailContent() {
   const [reportData, setReportData] = useState<RunReportResponse | null>(null);
   const [traceData, setTraceData] = useState<RunTraceResponse | null>(null);
   const [events, setEvents] = useState<RunEventPayload[]>([]);
+  const [claimsList, setClaimsList] = useState<ClaimResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Claim drill-down panel state
+  const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
+  const [selectedSentence, setSelectedSentence] = useState<string | null>(null);
+  const [relatedClaimIds, setRelatedClaimIds] = useState<string[]>([]);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
 
   // Live timer state
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -95,7 +180,7 @@ function RunDetailContent() {
 
     let isMounted = true;
 
-    // Fetch initial status, report, and trace
+    // Fetch initial status, report, trace, and claims
     async function fetchInitialData() {
       try {
         const status = await apiClient.getRun(runId);
@@ -103,7 +188,15 @@ function RunDetailContent() {
         setStatusData(status);
         setIsLoading(false);
 
-        // Sync stop reason and stages if already terminal
+        // Fetch claims
+        try {
+          const claims = await apiClient.getClaims(runId);
+          if (isMounted) setClaimsList(claims);
+        } catch {
+          // Claims not yet generated
+        }
+
+        // Fetch report if ready
         if (status.status === "completed" || status.status === "abstained") {
           try {
             const rep = await apiClient.getReport(runId);
@@ -358,6 +451,14 @@ function RunDetailContent() {
               })
               .catch(() => {});
 
+            // Fetch final claims
+            apiClient
+              .getClaims(runId)
+              .then((claims) => {
+                if (isMounted) setClaimsList(claims);
+              })
+              .catch(() => {});
+
             // Update terminal status
             apiClient
               .getRun(runId)
@@ -408,8 +509,8 @@ function RunDetailContent() {
       },
     });
 
-    // Periodic trace sync every 2.5s while active
-    const tracePollInterval = setInterval(async () => {
+    // Periodic trace and claims sync every 2.5s while active
+    const pollInterval = setInterval(async () => {
       if (!isMounted) return;
       try {
         const tr = await apiClient.getTrace(runId);
@@ -426,6 +527,13 @@ function RunDetailContent() {
             setElapsedSeconds(tr.cost_totals.elapsed_seconds);
           }
         }
+
+        if (claimsList.length === 0) {
+          const claims = await apiClient.getClaims(runId);
+          if (isMounted && claims.length > 0) {
+            setClaimsList(claims);
+          }
+        }
       } catch {
         // ignore polling errors
       }
@@ -434,9 +542,43 @@ function RunDetailContent() {
     return () => {
       isMounted = false;
       unsubscribe();
-      clearInterval(tracePollInterval);
+      clearInterval(pollInterval);
     };
-  }, [runId, isRunning]);
+  }, [runId, isRunning, claimsList.length]);
+
+  // Open drill-down handler
+  const handleSelectClaim = async (
+    claimId: string,
+    sentence?: string,
+    allClaimIds: string[] = []
+  ) => {
+    setSelectedClaimId(claimId);
+    setSelectedSentence(sentence || null);
+    setRelatedClaimIds(allClaimIds.length > 0 ? allClaimIds : [claimId]);
+    setIsPanelOpen(true);
+
+    // If claim not already in claimsList, fetch it individually
+    if (!claimsList.some((c) => c.claim_id === claimId)) {
+      try {
+        const fetched = await apiClient.getClaim(claimId);
+        setClaimsList((prev) => [...prev, fetched]);
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const selectedClaim = selectedClaimId
+    ? claimsList.find((c) => c.claim_id === selectedClaimId) || null
+    : null;
+
+  // Extract Scenario Values from Outcome State or Default
+  const scenarioData = extractScenarioData(statusData);
+
+  // Extract Risks from Outcome State or Default
+  const risksData = extractRisksData(statusData);
+
+  const primaryTicker = getPrimaryTicker(stages, statusData);
 
   return (
     <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 sm:px-6">
@@ -515,13 +657,13 @@ function RunDetailContent() {
       {/* Live Orchestration Stages Checklist */}
       <StageChecklist stages={stages} />
 
-      {/* Synthesized Research Report Section */}
+      {/* Synthesized Research Report Section with Sentence Drill-down */}
       {reportData && (
         <div className="mb-8 p-6 sm:p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-zinc-100 dark:border-zinc-800 gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-5 border-b border-zinc-100 dark:border-zinc-800 gap-2">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                Final Deliverable
+                Audited Final Deliverable
               </span>
               <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
                 {reportData.is_abstention
@@ -530,6 +672,9 @@ function RunDetailContent() {
               </h2>
             </div>
             <div className="flex items-center gap-2">
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 hidden sm:inline">
+                Click any sentence to inspect audited evidence ↗
+              </span>
               {reportData.confidence_score !== null &&
                 reportData.confidence_score !== undefined && (
                   <span className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 font-semibold font-mono text-zinc-700 dark:text-zinc-300">
@@ -544,36 +689,28 @@ function RunDetailContent() {
             </div>
           </div>
 
-          <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans text-zinc-800 dark:text-zinc-200">
-            {reportData.markdown}
-          </div>
+          {/* Interactive Report View */}
+          <InteractiveReport
+            markdown={reportData.markdown}
+            sentenceToClaims={reportData.sentence_to_claims}
+            onSelectClaim={handleSelectClaim}
+            selectedClaimId={selectedClaimId}
+          />
+        </div>
+      )}
 
-          {/* Sentence-level Claim Grounding Map */}
-          {reportData.sentence_to_claims &&
-            Object.keys(reportData.sentence_to_claims).length > 0 && (
-              <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
-                  Sentence Grounding Citations
-                </h4>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-[11px]">
-                  {Object.entries(reportData.sentence_to_claims).map(
-                    ([sentence, claimIds], idx) => (
-                      <div
-                        key={idx}
-                        className="p-2 rounded-lg bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-100 dark:border-zinc-800 flex items-start justify-between gap-3"
-                      >
-                        <span className="text-zinc-700 dark:text-zinc-300 line-clamp-2">
-                          &ldquo;{sentence}&rdquo;
-                        </span>
-                        <span className="text-indigo-600 dark:text-indigo-400 font-semibold shrink-0">
-                          [{claimIds.join(", ")}]
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
+      {/* Scenario Values Chart & Downside Risks Table */}
+      {reportData && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <ScenarioChart
+            scenarios={scenarioData}
+            currentPrice={215.0}
+            ticker={primaryTicker}
+          />
+          <RisksTable
+            risks={risksData}
+            onSelectClaim={(cid) => handleSelectClaim(cid)}
+          />
         </div>
       )}
 
@@ -662,6 +799,18 @@ function RunDetailContent() {
           </div>
         </div>
       )}
+
+      {/* Claim Drill-Down Side Panel Flyout */}
+      <ClaimDrillDownPanel
+        isOpen={isPanelOpen}
+        onClose={() => setIsPanelOpen(false)}
+        claim={selectedClaim}
+        sentence={selectedSentence}
+        allReferencedClaimIds={relatedClaimIds}
+        onSwitchClaim={(cid) =>
+          handleSelectClaim(cid, selectedSentence || undefined, relatedClaimIds)
+        }
+      />
     </main>
   );
 }
