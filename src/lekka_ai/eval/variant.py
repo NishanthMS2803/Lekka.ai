@@ -230,10 +230,12 @@ class AgentVariant(Variant):
         llm: LLMClient,
         name: str = "analyst_agent",
         limits: Limits | None = None,
+        memory: bool = False,
     ) -> None:
         self.name = name
         self.llm = llm
         self.limits = limits or Limits(max_iterations=10, max_seconds=120.0)
+        self.memory = memory
 
     async def run(
         self,
@@ -261,6 +263,10 @@ class AgentVariant(Variant):
             agent_type="analyst",
         )
         profile = create_analyst_profile()
+        if not self.memory:
+            profile.allowed_tools = [
+                t for t in profile.allowed_tools if t != "recall_facts"
+            ]
         tool_view = ToolView(default_registry, profile=profile)
 
         start_t = time.perf_counter()

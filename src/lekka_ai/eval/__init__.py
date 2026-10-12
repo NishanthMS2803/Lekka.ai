@@ -1,6 +1,7 @@
 """Evaluation harness for benchmarking specialist agent variants against baselines."""
 
 from lekka_ai.eval.dataset import EvalExample, load_dataset, save_dataset
+from lekka_ai.eval.eval_all import run_full_evaluation
 from lekka_ai.eval.grader import (
     ExtractedNumber,
     GradeResult,
@@ -113,6 +114,7 @@ __all__ = [
     "numeric_accuracy_metric",
     "recovery_rate",
     "risk_recall",
+    "run_full_evaluation",
     "run_judge_validation",
     "save_dataset",
     "success_metric",
