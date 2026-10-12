@@ -164,6 +164,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get latest evaluation benchmark results and comparison data
+         * @description Retrieve evaluation benchmark metrics across variants and ablations.
+         */
+        get: operations["get_eval_results_evals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download or view raw REPORT.md markdown
+         * @description Return raw markdown content of eval/results/REPORT.md.
+         */
+        get: operations["get_eval_report_evals_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/plots/{plot_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serve generated evaluation plot image
+         * @description Serve visualization plot PNG from eval/results/plots/.
+         */
+        get: operations["get_eval_plot_evals_plots__plot_name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -288,6 +348,50 @@ export interface components {
             fault_plan?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * EvalResultsResponse
+         * @description Evaluation benchmark results across all pipeline variants and ablations.
+         */
+        EvalResultsResponse: {
+            /**
+             * Eval Run Id
+             * @description Unique evaluation run identifier
+             */
+            eval_run_id: string;
+            /**
+             * Timestamp
+             * @description ISO execution timestamp
+             */
+            timestamp: string;
+            /**
+             * Budget Cap Usd
+             * @description Allocated budget cap in USD
+             * @default 1
+             */
+            budget_cap_usd: number;
+            /**
+             * Total Spend Usd
+             * @description Total spend in USD
+             * @default 0
+             */
+            total_spend_usd: number;
+            /**
+             * Variants
+             * @description Performance metrics by variant
+             */
+            variants?: components["schemas"]["VariantMetricsResponse"][];
+            /**
+             * Report Markdown
+             * @description Complete REPORT.md contents
+             * @default
+             */
+            report_markdown: string;
+            /**
+             * Available Plots
+             * @description List of generated plot filenames
+             */
+            available_plots?: string[];
         };
         /**
          * EvidenceResponse
@@ -560,6 +664,107 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * VariantMetricsResponse
+         * @description Aggregate evaluation metrics for a single pipeline variant.
+         */
+        VariantMetricsResponse: {
+            /**
+             * Variant
+             * @description Variant name, e.g. v1_direct, v5_dynamic
+             */
+            variant: string;
+            /**
+             * Accuracy
+             * @description Task factual accuracy rate
+             * @default 0
+             */
+            accuracy: number;
+            /**
+             * Citation Precision
+             * @description Citation precision rate
+             * @default 0
+             */
+            citation_precision: number;
+            /**
+             * Unsupported Facts
+             * @description Unsupported fact rate
+             * @default 0
+             */
+            unsupported_facts: number;
+            /**
+             * Risk Recall
+             * @description Theme risk recall rate
+             * @default 0
+             */
+            risk_recall: number;
+            /**
+             * Calibration
+             * @description Calibration Brier score
+             * @default 0
+             */
+            calibration: number;
+            /**
+             * Abstention Quality
+             * @description Abstention quality score
+             * @default 0
+             */
+            abstention_quality: number;
+            /**
+             * Success Rate
+             * @description Pipeline run success rate
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Avg Cost
+             * @description Average cost in USD per query
+             * @default 0
+             */
+            avg_cost: number;
+            /**
+             * Total Cost
+             * @description Total cost in USD
+             * @default 0
+             */
+            total_cost: number;
+            /**
+             * Avg Tokens
+             * @description Average tokens per query
+             * @default 0
+             */
+            avg_tokens: number;
+            /**
+             * Avg Tool Calls
+             * @description Average tool calls per query
+             * @default 0
+             */
+            avg_tool_calls: number;
+            /**
+             * Unnecessary Calls
+             * @description Average unnecessary calls
+             * @default 0
+             */
+            unnecessary_calls: number;
+            /**
+             * Avg Latency Ms
+             * @description Average latency in ms
+             * @default 0
+             */
+            avg_latency_ms: number;
+            /**
+             * Min Latency Ms
+             * @description Minimum latency in ms
+             * @default 0
+             */
+            min_latency_ms: number;
+            /**
+             * Max Latency Ms
+             * @description Maximum latency in ms
+             * @default 0
+             */
+            max_latency_ms: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -806,6 +1011,75 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ClaimResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eval_results_evals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalResultsResponse"];
+                };
+            };
+        };
+    };
+    get_eval_report_evals_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    get_eval_plot_evals_plots__plot_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plot_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

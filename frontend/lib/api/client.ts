@@ -10,6 +10,8 @@ export type EvidenceResponse = components["schemas"]["EvidenceResponse"];
 export type RunTraceResponse = components["schemas"]["RunTraceResponse"];
 export type SpanResponse = components["schemas"]["SpanResponse"];
 export type CostTotalsResponse = components["schemas"]["CostTotalsResponse"];
+export type EvalResultsResponse = components["schemas"]["EvalResultsResponse"];
+export type VariantMetricsResponse = components["schemas"]["VariantMetricsResponse"];
 export type HTTPValidationError = components["schemas"]["HTTPValidationError"];
 
 export class ApiClientError extends Error {
@@ -31,7 +33,7 @@ export interface ApiClientConfig {
 }
 
 export class ApiClient {
-  private readonly baseUrl: string;
+  public readonly baseUrl: string;
   private readonly defaultHeaders: Record<string, string>;
   private readonly fetch: typeof fetch;
 
@@ -167,6 +169,38 @@ export class ApiClient {
       `/runs/${encodeURIComponent(runId)}/trace`,
       { method: "GET" }
     );
+  }
+
+  /**
+   * Retrieve evaluation benchmarking results across variants
+   */
+  async getEvals(): Promise<EvalResultsResponse> {
+    return this.request<EvalResultsResponse>("/evals", { method: "GET" });
+  }
+
+  /**
+   * Retrieve raw REPORT.md markdown text
+   */
+  async getEvalReport(): Promise<string> {
+    const url = `${this.baseUrl}/evals/report`;
+    const res = await this.fetch(url, {
+      method: "GET",
+      headers: { ...this.defaultHeaders },
+    });
+    if (!res.ok) {
+      throw new ApiClientError(
+        `Failed to fetch eval report: ${res.statusText}`,
+        res.status
+      );
+    }
+    return res.text();
+  }
+
+  /**
+   * Generate URL for a static plot generated during eval benchmark run
+   */
+  getEvalPlotUrl(plotName: string): string {
+    return `${this.baseUrl}/evals/plots/${encodeURIComponent(plotName)}`;
   }
 }
 

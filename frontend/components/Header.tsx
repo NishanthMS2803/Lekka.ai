@@ -40,7 +40,7 @@ export function Header() {
               Agents
             </Link>
             <Link
-              href="/#reports"
+              href="/evals"
               className="px-3 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
             >
               Evaluations

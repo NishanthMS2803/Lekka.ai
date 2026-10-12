@@ -214,3 +214,50 @@ class RunTraceResponse(BaseModel):
         default_factory=CostTotalsResponse,
         description="Cumulative tokens, tool calls, and USD cost totals",
     )
+
+
+class VariantMetricsResponse(BaseModel):
+    """Aggregate evaluation metrics for a single pipeline variant."""
+
+    variant: str = Field(..., description="Variant name, e.g. v1_direct, v5_dynamic")
+    accuracy: float = Field(default=0.0, description="Task factual accuracy rate")
+    citation_precision: float = Field(
+        default=0.0, description="Citation precision rate"
+    )
+    unsupported_facts: float = Field(default=0.0, description="Unsupported fact rate")
+    risk_recall: float = Field(default=0.0, description="Theme risk recall rate")
+    calibration: float = Field(default=0.0, description="Calibration Brier score")
+    abstention_quality: float = Field(
+        default=0.0, description="Abstention quality score"
+    )
+    success_rate: float = Field(default=0.0, description="Pipeline run success rate")
+    avg_cost: float = Field(default=0.0, description="Average cost in USD per query")
+    total_cost: float = Field(default=0.0, description="Total cost in USD")
+    avg_tokens: float = Field(default=0.0, description="Average tokens per query")
+    avg_tool_calls: float = Field(
+        default=0.0, description="Average tool calls per query"
+    )
+    unnecessary_calls: float = Field(
+        default=0.0, description="Average unnecessary calls"
+    )
+    avg_latency_ms: float = Field(default=0.0, description="Average latency in ms")
+    min_latency_ms: float = Field(default=0.0, description="Minimum latency in ms")
+    max_latency_ms: float = Field(default=0.0, description="Maximum latency in ms")
+
+
+class EvalResultsResponse(BaseModel):
+    """Evaluation benchmark results across all pipeline variants and ablations."""
+
+    eval_run_id: str = Field(..., description="Unique evaluation run identifier")
+    timestamp: str = Field(..., description="ISO execution timestamp")
+    budget_cap_usd: float = Field(
+        default=1.0, description="Allocated budget cap in USD"
+    )
+    total_spend_usd: float = Field(default=0.0, description="Total spend in USD")
+    variants: list[VariantMetricsResponse] = Field(
+        default_factory=list, description="Performance metrics by variant"
+    )
+    report_markdown: str = Field(default="", description="Complete REPORT.md contents")
+    available_plots: list[str] = Field(
+        default_factory=list, description="List of generated plot filenames"
+    )

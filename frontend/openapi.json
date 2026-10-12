@@ -374,6 +374,86 @@
           }
         }
       }
+    },
+    "/evals": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Get latest evaluation benchmark results and comparison data",
+        "description": "Retrieve evaluation benchmark metrics across variants and ablations.",
+        "operationId": "get_eval_results_evals_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalResultsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/evals/report": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Download or view raw REPORT.md markdown",
+        "description": "Return raw markdown content of eval/results/REPORT.md.",
+        "operationId": "get_eval_report_evals_report_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/evals/plots/{plot_name}": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Serve generated evaluation plot image",
+        "description": "Serve visualization plot PNG from eval/results/plots/.",
+        "operationId": "get_eval_plot_evals_plots__plot_name__get",
+        "parameters": [
+          {
+            "name": "plot_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plot Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -568,6 +648,61 @@
         ],
         "title": "CreateRunRequest",
         "description": "Payload to initiate an orchestrated multi-agent research run."
+      },
+      "EvalResultsResponse": {
+        "properties": {
+          "eval_run_id": {
+            "type": "string",
+            "title": "Eval Run Id",
+            "description": "Unique evaluation run identifier"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "ISO execution timestamp"
+          },
+          "budget_cap_usd": {
+            "type": "number",
+            "title": "Budget Cap Usd",
+            "description": "Allocated budget cap in USD",
+            "default": 1.0
+          },
+          "total_spend_usd": {
+            "type": "number",
+            "title": "Total Spend Usd",
+            "description": "Total spend in USD",
+            "default": 0.0
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/VariantMetricsResponse"
+            },
+            "type": "array",
+            "title": "Variants",
+            "description": "Performance metrics by variant"
+          },
+          "report_markdown": {
+            "type": "string",
+            "title": "Report Markdown",
+            "description": "Complete REPORT.md contents",
+            "default": ""
+          },
+          "available_plots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Plots",
+            "description": "List of generated plot filenames"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_run_id",
+          "timestamp"
+        ],
+        "title": "EvalResultsResponse",
+        "description": "Evaluation benchmark results across all pipeline variants and ablations."
       },
       "EvidenceResponse": {
         "properties": {
@@ -1029,6 +1164,111 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VariantMetricsResponse": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "Variant name, e.g. v1_direct, v5_dynamic"
+          },
+          "accuracy": {
+            "type": "number",
+            "title": "Accuracy",
+            "description": "Task factual accuracy rate",
+            "default": 0.0
+          },
+          "citation_precision": {
+            "type": "number",
+            "title": "Citation Precision",
+            "description": "Citation precision rate",
+            "default": 0.0
+          },
+          "unsupported_facts": {
+            "type": "number",
+            "title": "Unsupported Facts",
+            "description": "Unsupported fact rate",
+            "default": 0.0
+          },
+          "risk_recall": {
+            "type": "number",
+            "title": "Risk Recall",
+            "description": "Theme risk recall rate",
+            "default": 0.0
+          },
+          "calibration": {
+            "type": "number",
+            "title": "Calibration",
+            "description": "Calibration Brier score",
+            "default": 0.0
+          },
+          "abstention_quality": {
+            "type": "number",
+            "title": "Abstention Quality",
+            "description": "Abstention quality score",
+            "default": 0.0
+          },
+          "success_rate": {
+            "type": "number",
+            "title": "Success Rate",
+            "description": "Pipeline run success rate",
+            "default": 0.0
+          },
+          "avg_cost": {
+            "type": "number",
+            "title": "Avg Cost",
+            "description": "Average cost in USD per query",
+            "default": 0.0
+          },
+          "total_cost": {
+            "type": "number",
+            "title": "Total Cost",
+            "description": "Total cost in USD",
+            "default": 0.0
+          },
+          "avg_tokens": {
+            "type": "number",
+            "title": "Avg Tokens",
+            "description": "Average tokens per query",
+            "default": 0.0
+          },
+          "avg_tool_calls": {
+            "type": "number",
+            "title": "Avg Tool Calls",
+            "description": "Average tool calls per query",
+            "default": 0.0
+          },
+          "unnecessary_calls": {
+            "type": "number",
+            "title": "Unnecessary Calls",
+            "description": "Average unnecessary calls",
+            "default": 0.0
+          },
+          "avg_latency_ms": {
+            "type": "number",
+            "title": "Avg Latency Ms",
+            "description": "Average latency in ms",
+            "default": 0.0
+          },
+          "min_latency_ms": {
+            "type": "number",
+            "title": "Min Latency Ms",
+            "description": "Minimum latency in ms",
+            "default": 0.0
+          },
+          "max_latency_ms": {
+            "type": "number",
+            "title": "Max Latency Ms",
+            "description": "Maximum latency in ms",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "variant"
+        ],
+        "title": "VariantMetricsResponse",
+        "description": "Aggregate evaluation metrics for a single pipeline variant."
       }
     }
   }

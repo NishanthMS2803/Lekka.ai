@@ -623,3 +623,36 @@ async def test_get_run_trace_and_matches_db() -> None:
         assert len(denial_spans) >= 1
         assert denial_spans[0]["status"] == "error"
         assert "Permission denied" in denial_spans[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_evals_endpoints() -> None:
+    """GET /evals, /evals/report, and /evals/plots/{name} serve evaluation data."""
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # 1. Test GET /evals
+        evals_res = await client.get("/evals")
+        assert evals_res.status_code == 200
+        data = evals_res.json()
+        assert "eval_run_id" in data
+        assert "variants" in data
+        assert isinstance(data["variants"], list)
+        assert len(data["variants"]) > 0
+
+        # Check first variant structure
+        v0 = data["variants"][0]
+        assert "variant" in v0
+        assert "accuracy" in v0
+        assert "citation_precision" in v0
+        assert "success_rate" in v0
+        assert "avg_latency_ms" in v0
+
+        # 2. Test GET /evals/report
+        report_res = await client.get("/evals/report")
+        if report_res.status_code == 200:
+            assert "# " in report_res.text or "Report" in report_res.text
+
+        # 3. Test GET /evals/plots/nonexistent
+        plot_404 = await client.get("/evals/plots/unknown_nonexistent_plot.png")
+        assert plot_404.status_code == 404

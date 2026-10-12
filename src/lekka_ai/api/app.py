@@ -96,11 +96,12 @@ def create_app(cors_origins: list[str] | None = None) -> FastAPI:
         """Return application health status and version."""
         return {"status": "ok", "version": API_VERSION}
 
-    # Include run and claim API routers
-    from lekka_ai.api.routes import claims_router, runs_router
+    # Include run, claim, and eval API routers
+    from lekka_ai.api.routes import claims_router, evals_router, runs_router
 
     app.include_router(runs_router)
     app.include_router(claims_router)
+    app.include_router(evals_router)
 
     return app
 
