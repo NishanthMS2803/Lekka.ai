@@ -1,9 +1,9 @@
-"""Unit tests for engine evaluation variants V3, V4, V5 and ablation switches."""
+"""Tests for V3 static, V4 dynamic, and V5 dynamic engine evaluation variants."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,314 +14,551 @@ from lekka_ai.eval.variants import (
     V4DynamicVariant,
     V5DynamicVariant,
     VariantConfig,
-    build_ablated_profiles,
+    apply_ablation_to_profile,
 )
+from lekka_ai.harness.profiles import load_agent_profile
 from lekka_ai.llm.base import LLMResponse
 from lekka_ai.llm.fake import FakeLLM
 from lekka_ai.orchestrator.dispatch import TaskResult
+from lekka_ai.orchestrator.planner import PlannedTaskSpec, PlanSpec
 from lekka_ai.orchestrator.state import PlannedTask
+from lekka_ai.orchestrator.understand import ParsedQuery
 from lekka_ai.schemas.claims import Claim, ClaimType, Evidence
 
-# ---------------------------------------------------------------------------
-# Test Helpers & Fixtures
-# ---------------------------------------------------------------------------
 
-
-def _make_sample_task_result(task: PlannedTask) -> TaskResult:
-    """Mock TaskResult generator creating grounded claims per agent type."""
-    ev = Evidence(
-        source_type="sec_filing",
-        document_id="DOC_01",
-        tool_call_id="tc_01",
-        raw_value={"value": 100.0},
-    )
-    claim = Claim(
-        claim_id=f"c_{task.agent_type}_01",
-        text=f"{task.agent_type.capitalize()} finding for {task.task_id}",
+def _build_test_claims(agent_type: str) -> list[Claim]:
+    """Helper creating valid Grounded claims for unit test runs."""
+    c1 = Claim(
+        claim_id=f"claim_{agent_type}_1",
+        text=f"{agent_type.capitalize()} analysis verified with source evidence.",
         type=ClaimType.FACT,
-        confidence=0.95,
-        produced_by=task.agent_type,
-        evidence=[ev],
+        evidence=[
+            Evidence(
+                source_type="sec_filing",
+                document_id="10-K",
+                tool_call_id=f"call_{agent_type}_01",
+            )
+        ],
+        produced_by=agent_type,
+        confidence=0.92,
     )
-    return TaskResult(
-        task_id=task.task_id,
-        agent_type=task.agent_type,
-        status="completed",
-        claims=[claim],
-        usage={"tool_calls": 2, "tokens_in": 150, "tokens_out": 50},
-        confidence=0.95,
+    c2 = Claim(
+        claim_id=f"claim_{agent_type}_2",
+        text=f"Derived valuation multiple or trend for {agent_type}.",
+        type=ClaimType.INTERPRETATION,
+        produced_by=agent_type,
+        confidence=0.88,
+        depends_on=[c1.claim_id],
     )
+    return [c1, c2]
 
 
-# ---------------------------------------------------------------------------
-# Ablation Configuration Tests
-# ---------------------------------------------------------------------------
+def _build_mock_task_runner() -> Any:
+    """Create a task runner returning valid TaskResult with claims."""
 
-
-def test_build_ablated_profiles_risk_agent_off() -> None:
-    """When risk_agent is False, risk profile is excluded from roster."""
-    cfg = VariantConfig(risk_agent=False)
-    profiles = build_ablated_profiles(cfg)
-    assert "risk" not in profiles
-    assert "fundamental" in profiles
-    assert "valuation" in profiles
-
-
-def test_build_ablated_profiles_memory_off() -> None:
-    """When memory is False, recall_facts tool is stripped from all profiles."""
-    cfg = VariantConfig(memory=False)
-    profiles = build_ablated_profiles(cfg)
-    for name, prof in profiles.items():
-        assert "recall_facts" not in prof.allowed_tools, (
-            f"Profile {name} should not have recall_facts"
+    async def _runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
+        claims = _build_test_claims(task.agent_type)
+        return TaskResult(
+            task_id=task.task_id,
+            agent_type=task.agent_type,
+            status="completed",
+            claims=claims,
+            usage={
+                "tokens_in": 120,
+                "tokens_out": 45,
+                "tool_calls": 2,
+                "elapsed_seconds": 0.05,
+            },
+            confidence=0.91,
+            confidence_rationale=f"Completed research for {task.agent_type}",
         )
 
-
-def test_build_ablated_profiles_run_python_only() -> None:
-    """When quant_tools_mode is run_python_only, quant tools are removed."""
-    cfg = VariantConfig(quant_tools_mode="run_python_only")
-    profiles = build_ablated_profiles(cfg)
-    quant_tools = {"run_dcf", "run_reverse_dcf", "compute_multiples"}
-
-    val_tools = set(profiles["valuation"].allowed_tools)
-    assert not (val_tools & quant_tools)
-    assert "run_python" in val_tools
+    return _runner
 
 
-# ---------------------------------------------------------------------------
-# Variant V3 Static Tests
-# ---------------------------------------------------------------------------
+def test_apply_ablation_to_profile() -> None:
+    """Test ablation switches modifying agent allowed_tools."""
+    raw_profile = load_agent_profile("valuation")
+
+    # 1. Default config: tools unmodified
+    cfg_default = VariantConfig()
+    p_default = apply_ablation_to_profile(raw_profile, cfg_default)
+    assert "recall_facts" in p_default.allowed_tools
+    assert "run_dcf" in p_default.allowed_tools
+
+    # 2. Memory ablated (memory=False) -> recall_facts removed
+    cfg_no_mem = VariantConfig(memory=False)
+    p_no_mem = apply_ablation_to_profile(raw_profile, cfg_no_mem)
+    assert "recall_facts" not in p_no_mem.allowed_tools
+    assert "run_dcf" in p_no_mem.allowed_tools
+
+    # 3. Quant tools ablated (quant_tools=False) ->
+    # quant tools removed, run_python added
+    cfg_no_quant = VariantConfig(quant_tools=False)
+    p_no_quant = apply_ablation_to_profile(raw_profile, cfg_no_quant)
+    assert "run_dcf" not in p_no_quant.allowed_tools
+    assert "run_reverse_dcf" not in p_no_quant.allowed_tools
+    assert "run_python" in p_no_quant.allowed_tools
+    assert "recall_facts" in p_no_quant.allowed_tools
 
 
 @pytest.mark.asyncio
-async def test_v3_static_variant_runs_all_five_agents() -> None:
-    """V3 static variant dispatches all 5 agents simultaneously in 1 round."""
-    dispatched_agents: list[str] = []
+async def test_v3_static_variant_all_five_agents() -> None:
+    """Test V3 static variant always executes all 5 specialist agents in 1 round."""
+    runner = _build_mock_task_runner()
+    v3 = V3StaticVariant(
+        config=VariantConfig(verifier=False, risk_agent=True),
+        task_runner=runner,
+    )
 
-    async def mock_runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
-        dispatched_agents.append(task.agent_type)
-        return _make_sample_task_result(task)
+    result = await v3.run("Analyze NVDA balance sheet and risk factors")
 
-    fake_llm = FakeLLM(responses=[LLMResponse(text="Synthesis report.")])
-    v3 = V3StaticVariant(llm=fake_llm, task_runner=mock_runner)
-
-    result = await v3.run("What is Apple valuation and market risk?")
+    assert result.status == "completed"
     assert result.variant == "v3_static"
+    assert result.metadata["rounds"] == 1
+    dispatched = result.metadata["dispatched_agents"]
+    assert len(dispatched) == 5
+    assert set(dispatched) == {"fundamental", "valuation", "market", "news", "risk"}
+    assert len(result.claims) > 0
+
+
+@pytest.mark.asyncio
+async def test_v3_static_variant_risk_ablation() -> None:
+    """Test V3 static variant respects risk_agent=False ablation."""
+    runner = _build_mock_task_runner()
+    v3_no_risk = V3StaticVariant(
+        config=VariantConfig(verifier=False, risk_agent=False),
+        task_runner=runner,
+    )
+
+    result = await v3_no_risk.run("Analyze NVDA")
+
     assert result.status == "completed"
-    assert len(result.claims) == 5
-    assert set(dispatched_agents) == {
-        "fundamental",
-        "valuation",
-        "market",
-        "news",
-        "risk",
-    }
-    assert result.metadata.get("rounds") == 1
+    dispatched = result.metadata["dispatched_agents"]
+    assert len(dispatched) == 4
+    assert "risk" not in dispatched
+    assert set(dispatched) == {"fundamental", "valuation", "market", "news"}
 
 
 @pytest.mark.asyncio
-async def test_v3_static_variant_without_risk_agent() -> None:
-    """V3 with risk_agent=False runs only 4 non-risk agents."""
-    dispatched_agents: list[str] = []
+async def test_v3_static_variant_verifier_ablation() -> None:
+    """Test V3 verifier switch: verdicts present when True, empty when False."""
+    runner = _build_mock_task_runner()
 
-    async def mock_runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
-        dispatched_agents.append(task.agent_type)
-        return _make_sample_task_result(task)
+    # Case A: verifier = False
+    v3_no_verif = V3StaticVariant(
+        config=VariantConfig(verifier=False),
+        task_runner=runner,
+    )
+    res_no_verif = await v3_no_verif.run("Check MSFT metrics")
+    assert len(res_no_verif.metadata["verifier_verdicts"]) == 0
 
-    fake_llm = FakeLLM(responses=[LLMResponse(text="Report")])
-    cfg = VariantConfig(risk_agent=False)
-    v3 = V3StaticVariant(llm=fake_llm, config=cfg, task_runner=mock_runner)
-
-    result = await v3.run("Analyze Apple.")
-    assert len(result.claims) == 4
-    assert "risk" not in dispatched_agents
-
-
-# ---------------------------------------------------------------------------
-# Variant V4 Dynamic Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_v4_dynamic_variant_executes_planner_wave() -> None:
-    """V4 dynamic variant plans tasks dynamically and runs 1 round."""
-    # Mock planner JSON response selecting fundamental and valuation
-    understand_payload = {
-        "intent": "company_research",
-        "tickers": ["AAPL"],
-        "metrics": ["revenue"],
-        "needs_clarification": False,
-    }
-    planner_payload = {
-        "tasks": [
-            {
-                "task_id": "dyn_fund_01",
-                "agent_type": "fundamental",
-                "instruction": "Fetch AAPL revenues",
-                "priority": 1,
-            },
-            {
-                "task_id": "dyn_val_02",
-                "agent_type": "valuation",
-                "instruction": "Evaluate multiples",
-                "priority": 1,
-            },
-        ]
-    }
-    fake_llm = FakeLLM(
+    # Case B: verifier = True with FakeLLM
+    verif_llm = FakeLLM(
         responses=[
-            LLMResponse(text=json.dumps(understand_payload)),
-            LLMResponse(text=json.dumps(planner_payload)),
-            LLMResponse(text="V4 Final Synthesis."),
+            LLMResponse(
+                text='[{"claim_id": "c1", "supported": "yes", "reason": "Accurate"}]'
+            )
+        ]
+    )
+    v3_verif = V3StaticVariant(
+        llm=verif_llm,
+        config=VariantConfig(verifier=True),
+        task_runner=runner,
+    )
+    res_verif = await v3_verif.run("Check MSFT metrics")
+    assert len(res_verif.metadata["verifier_verdicts"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_v4_dynamic_variant_execution() -> None:
+    """Test V4 dynamic variant plans subset of agents dynamically in 1 round."""
+    runner = _build_mock_task_runner()
+
+    # Mock planner to select only market and news for a price movement question
+    understand_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="move_explanation",
+                    tickers=["AAPL"],
+                    needs_clarification=False,
+                )
+            )
+        ]
+    )
+    planner_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t_mkt",
+                            agent_type="market",
+                            instruction="Gather AAPL price history and volatility",
+                            priority=1,
+                        ),
+                        PlannedTaskSpec(
+                            task_id="t_news",
+                            agent_type="news",
+                            instruction="Retrieve AAPL catalyst news",
+                            priority=1,
+                        ),
+                    ]
+                )
+            )
         ]
     )
 
-    dispatched_agents: list[str] = []
+    v4 = V4DynamicVariant(
+        understand_llm=understand_fake,
+        planner_llm=planner_fake,
+        config=VariantConfig(verifier=False, risk_agent=True),
+        task_runner=runner,
+    )
 
-    async def mock_runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
-        dispatched_agents.append(task.agent_type)
-        return _make_sample_task_result(task)
+    result = await v4.run("Why did AAPL drop 3% today?")
 
-    v4 = V4DynamicVariant(llm=fake_llm, task_runner=mock_runner)
-    result = await v4.run("Analyze Apple revenue multiples.")
-
+    assert result.status == "completed"
     assert result.variant == "v4_dynamic"
-    assert result.status == "completed"
-    assert set(dispatched_agents) == {"fundamental", "valuation"}
-    assert len(result.claims) == 2
-
-
-# ---------------------------------------------------------------------------
-# Variant V5 Dynamic Re-planning Tests
-# ---------------------------------------------------------------------------
+    assert result.metadata["rounds"] == 1
+    dispatched = result.metadata["dispatched_agents"]
+    assert set(dispatched) == {"market", "news"}
+    assert "fundamental" not in dispatched
+    assert "valuation" not in dispatched
+    assert "risk" not in dispatched
 
 
 @pytest.mark.asyncio
-async def test_v5_dynamic_replan_variant() -> None:
-    """V5 dynamic variant executes planner + gap check + verifier."""
-    understand_payload = {
-        "intent": "company_research",
-        "tickers": ["MSFT"],
-        "metrics": ["growth"],
-        "needs_clarification": False,
-    }
-    planner_payload = {
-        "tasks": [
-            {
-                "task_id": "v5_task_01",
-                "agent_type": "market",
-                "instruction": "Analyze market price",
-                "priority": 1,
-            }
-        ]
-    }
-    gap_payload = {
-        "action": "done",
-        "follow_up_tasks": [],
-        "reasons": ["Sufficient market data gathered."],
-    }
-    verifier_payload = {
-        "verdicts": [
-            {
-                "claim_id": "c_market_01",
-                "supported": "yes",
-                "reason": "Matches trading feed",
-            }
-        ]
-    }
-    fake_llm = FakeLLM(
+async def test_v4_dynamic_variant_needs_clarification() -> None:
+    """Test V4 cleanly handles ambiguous questions requiring clarification."""
+    understand_fake = FakeLLM(
         responses=[
-            LLMResponse(text=json.dumps(understand_payload)),
-            LLMResponse(text=json.dumps(planner_payload)),
-            LLMResponse(text=json.dumps(gap_payload)),
-            LLMResponse(text=json.dumps(verifier_payload)),
-            LLMResponse(text="V5 Comprehensive Synthesis."),
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=[],
+                    needs_clarification=True,
+                    ambiguities=["Which company are you evaluating?"],
+                )
+            )
         ]
     )
 
-    async def mock_runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
-        return _make_sample_task_result(task)
+    v4 = V4DynamicVariant(
+        understand_llm=understand_fake,
+        config=VariantConfig(verifier=False),
+    )
 
-    v5 = V5DynamicVariant(llm=fake_llm, task_runner=mock_runner)
-    result = await v5.run("What is Microsoft market performance?")
+    result = await v4.run("Is the stock a good buy?")
 
-    assert result.variant == "v5_dynamic"
-    assert result.status == "completed"
-    assert len(result.claims) >= 1
-    assert "verifier_verdicts" in result.metadata
-
-
-# ---------------------------------------------------------------------------
-# Verification on 2-Question Dataset Tests
-# ---------------------------------------------------------------------------
+    assert result.status == "needs_clarification"
+    assert result.is_abstention is True
+    assert "Which company" in result.answer
 
 
 @pytest.mark.asyncio
-async def test_all_variants_run_on_two_question_dataset() -> None:
-    """Verify V3, V4, and V5 run on a 2-question benchmark dataset."""
+async def test_v5_dynamic_variant_multiround_and_risk_wave() -> None:
+    """Test V5 executes dynamic plan, mandatory risk wave, and multi-round gap check."""
+    runner = _build_mock_task_runner()
+
+    understand_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["TSLA"],
+                    needs_clarification=False,
+                )
+            )
+        ]
+    )
+    planner_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t_fund",
+                            agent_type="fundamental",
+                            instruction="Evaluate TSLA margins",
+                            priority=1,
+                        ),
+                    ]
+                )
+            )
+        ]
+    )
+    # Round 1 gap check requests follow-up task; Round 2 concludes done
+    gapcheck_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                text=(
+                    '{"action": "follow_up", "follow_up_tasks": ['
+                    '{"task_id": "t_val_followup", "agent_type": "valuation", '
+                    '"instruction": "Model reverse DCF", "priority": 1, '
+                    '"depends_on": []}],'
+                    '"reasons": ["Need valuation multiple grounding"]}'
+                )
+            ),
+            LLMResponse(
+                text=(
+                    '{"action": "done", "follow_up_tasks": [], '
+                    '"reasons": ["All questions resolved"]}'
+                )
+            ),
+        ]
+    )
+    verif_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                text='[{"claim_id": "c1", "supported": "yes", "reason": "Confirmed"}]'
+            )
+        ]
+    )
+
+    v5 = V5DynamicVariant(
+        understand_llm=understand_fake,
+        planner_llm=planner_fake,
+        gapcheck_llm=gapcheck_fake,
+        verifier_llm=verif_fake,
+        config=VariantConfig(verifier=True, risk_agent=True, max_rounds=3),
+        task_runner=runner,
+    )
+
+    result = await v5.run("Comprehensive valuation and risk analysis for TSLA")
+
+    assert result.status == "completed"
+    assert result.variant == "v5_dynamic"
+    assert result.metadata["rounds"] == 2
+    dispatched = result.metadata["dispatched_agents"]
+
+    # Verify risk wave executed
+    assert "risk" in dispatched
+    assert "fundamental" in dispatched
+    assert "valuation" in dispatched
+    # Verify verifier verdicts recorded
+    assert len(result.metadata["verifier_verdicts"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_v5_dynamic_variant_risk_ablation() -> None:
+    """Test V5 strips risk wave when risk_agent=False."""
+    runner = _build_mock_task_runner()
+
+    understand_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["GOOGL"],
+                    needs_clarification=False,
+                )
+            )
+        ]
+    )
+    planner_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t_fund",
+                            agent_type="fundamental",
+                            instruction="Evaluate GOOGL margins",
+                            priority=1,
+                        ),
+                    ]
+                )
+            )
+        ]
+    )
+    gapcheck_fake = FakeLLM(
+        responses=[
+            LLMResponse(
+                text='{"action": "done", "follow_up_tasks": [], "reasons": ["Done"]}'
+            )
+        ]
+    )
+
+    v5_no_risk = V5DynamicVariant(
+        understand_llm=understand_fake,
+        planner_llm=planner_fake,
+        gapcheck_llm=gapcheck_fake,
+        config=VariantConfig(verifier=False, risk_agent=False),
+        task_runner=runner,
+    )
+
+    result = await v5_no_risk.run("Evaluate GOOGL")
+
+    assert result.status == "completed"
+    dispatched = result.metadata["dispatched_agents"]
+    assert "risk" not in dispatched
+    assert "fundamental" in dispatched
+
+
+@pytest.mark.asyncio
+async def test_all_variants_on_two_question_dataset() -> None:
+    """Verify that all variants (V3, V4, V5) run on a 2-question dataset."""
     dataset = [
         EvalExample(
-            id="q_apple",
-            question="What was Apple revenue for 2024?",
-            ticker="AAPL",
-            as_of_date="2024-09-30",
+            id="q1_nvda",
+            question="What factors drove NVDA gross margin expansion in FY24?",
+            ticker="NVDA",
+            expected="Data center compute demand drove margin expansion.",
         ),
         EvalExample(
-            id="q_nvidia",
-            question="What drove Nvidia Data Center revenue?",
-            ticker="NVDA",
-            as_of_date="2024-07-31",
+            id="q2_aapl",
+            question="Evaluate AAPL valuation and downside risk scenarios.",
+            ticker="AAPL",
+            expected=("Trading multiples are elevated relative to historical median."),
         ),
     ]
 
-    async def mock_runner(task: PlannedTask, scratch_dir: Path) -> TaskResult:
-        return _make_sample_task_result(task)
+    runner = _build_mock_task_runner()
 
-    # Prepare FakeLLM responses for query understanding, planning, gapcheck, synthesis
-    task_json = json.dumps(
-        {
-            "tasks": [
-                {
-                    "task_id": "t1",
-                    "agent_type": "fundamental",
-                    "instruction": "Check revenue",
-                    "priority": 1,
-                }
-            ]
-        }
+    # V3 variant
+    v3 = V3StaticVariant(
+        config=VariantConfig(verifier=False),
+        task_runner=runner,
     )
-    gap_json = json.dumps(
-        {"action": "done", "follow_up_tasks": [], "reasons": ["Complete"]}
+
+    # V4 variant with fake planner
+    understand_fake_v4 = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["NVDA"],
+                    needs_clarification=False,
+                )
+            ),
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["AAPL"],
+                    needs_clarification=False,
+                )
+            ),
+        ]
     )
-    verdict_json = json.dumps(
-        {
-            "verdicts": [
-                {
-                    "claim_id": "c_fundamental_01",
-                    "supported": "yes",
-                    "reason": "Verified",
-                }
-            ]
-        }
+    planner_fake_v4 = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t1",
+                            agent_type="fundamental",
+                            instruction="Review NVDA margins",
+                            priority=1,
+                        )
+                    ]
+                )
+            ),
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t2",
+                            agent_type="valuation",
+                            instruction="Review AAPL valuation",
+                            priority=1,
+                        )
+                    ]
+                )
+            ),
+        ]
     )
-    llm_responses = [
-        LLMResponse(text='{"intent": "research", "tickers": ["AAPL"]}'),
-        LLMResponse(text=task_json),
-        LLMResponse(text=gap_json),
-        LLMResponse(text=verdict_json),
-        LLMResponse(text="Report answer"),
-    ] * 10
-    fake_llm = FakeLLM(responses=llm_responses)
+    v4 = V4DynamicVariant(
+        understand_llm=understand_fake_v4,
+        planner_llm=planner_fake_v4,
+        config=VariantConfig(verifier=False),
+        task_runner=runner,
+    )
 
-    v3 = V3StaticVariant(llm=fake_llm, task_runner=mock_runner)
-    v4 = V4DynamicVariant(llm=fake_llm, task_runner=mock_runner)
-    v5 = V5DynamicVariant(llm=fake_llm, task_runner=mock_runner)
+    # V5 variant with fake planner and gap check
+    understand_fake_v5 = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["NVDA"],
+                    needs_clarification=False,
+                )
+            ),
+            LLMResponse(
+                structured_output=ParsedQuery(
+                    intent="investment_evaluation",
+                    tickers=["AAPL"],
+                    needs_clarification=False,
+                )
+            ),
+        ]
+    )
+    planner_fake_v5 = FakeLLM(
+        responses=[
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t1",
+                            agent_type="fundamental",
+                            instruction="Review NVDA margins",
+                            priority=1,
+                        )
+                    ]
+                )
+            ),
+            LLMResponse(
+                structured_output=PlanSpec(
+                    tasks=[
+                        PlannedTaskSpec(
+                            task_id="t2",
+                            agent_type="valuation",
+                            instruction="Review AAPL valuation",
+                            priority=1,
+                        )
+                    ]
+                )
+            ),
+        ]
+    )
+    gapcheck_fake_v5 = FakeLLM(
+        responses=[
+            LLMResponse(
+                text=(
+                    '{"action": "done", "follow_up_tasks": [], "reasons": ["Verified"]}'
+                )
+            ),
+            LLMResponse(
+                text=(
+                    '{"action": "done", "follow_up_tasks": [], "reasons": ["Verified"]}'
+                )
+            ),
+        ]
+    )
+    v5 = V5DynamicVariant(
+        understand_llm=understand_fake_v5,
+        planner_llm=planner_fake_v5,
+        gapcheck_llm=gapcheck_fake_v5,
+        config=VariantConfig(verifier=False),
+        task_runner=runner,
+    )
 
-    runner = EvalRunner()
-    summary = await runner.run(dataset=dataset, variants=[v3, v4, v5])
+    from lekka_ai.eval.metrics import success_metric
 
-    # 3 variants x 2 questions = 6 total results
+    eval_runner = EvalRunner(metrics={"success": success_metric})
+    summary = await eval_runner.run(
+        dataset=dataset,
+        variants=[v3, v4, v5],
+        print_summary=False,
+    )
+
+    # 3 variants x 2 questions = 6 run results
     assert len(summary.results) == 6
+    assert all(r.status == "completed" for r in summary.results)
+    assert all(not r.error for r in summary.results)
     assert "v3_static" in summary.variants
     assert "v4_dynamic" in summary.variants
     assert "v5_dynamic" in summary.variants

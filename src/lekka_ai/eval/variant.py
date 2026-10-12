@@ -263,10 +263,6 @@ class AgentVariant(Variant):
             agent_type="analyst",
         )
         profile = create_analyst_profile()
-        if not self.memory:
-            profile.allowed_tools = [
-                t for t in profile.allowed_tools if t != "recall_facts"
-            ]
         tool_view = ToolView(default_registry, profile=profile)
 
         start_t = time.perf_counter()
@@ -317,3 +313,26 @@ class AgentVariant(Variant):
                 tool_calls=0,
                 error=str(exc),
             )
+
+
+# Re-exports of engine variants
+from lekka_ai.eval.variants.base import (  # noqa: E402
+    BaseEngineVariant,
+    VariantConfig,
+)
+from lekka_ai.eval.variants.v3_static import V3StaticVariant  # noqa: E402
+from lekka_ai.eval.variants.v4_dynamic import V4DynamicVariant  # noqa: E402
+from lekka_ai.eval.variants.v5_dynamic import V5DynamicVariant  # noqa: E402
+
+__all__ = [
+    "AgentVariant",
+    "BaseEngineVariant",
+    "DirectVariant",
+    "RunResult",
+    "StubVariant",
+    "V3StaticVariant",
+    "V4DynamicVariant",
+    "V5DynamicVariant",
+    "Variant",
+    "VariantConfig",
+]

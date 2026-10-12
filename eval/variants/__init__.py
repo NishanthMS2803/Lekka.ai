@@ -1,23 +1,23 @@
-"""Evaluation variants package re-exporting from lekka_ai.eval.variants."""
+"""Engine variants re-exports for root eval package."""
+
+from __future__ import annotations
 
 from lekka_ai.eval.variants import (
-    EngineVariant,
-    QuantToolsMode,
+    BaseEngineVariant,
     V3StaticVariant,
     V4DynamicVariant,
     V5DynamicVariant,
     VariantConfig,
-    VariantType,
-    build_ablated_profiles,
+    apply_ablation_to_profile,
+    collect_claims_from_state,
 )
 
 __all__ = [
-    "EngineVariant",
-    "QuantToolsMode",
+    "BaseEngineVariant",
+    "VariantConfig",
+    "apply_ablation_to_profile",
+    "collect_claims_from_state",
     "V3StaticVariant",
     "V4DynamicVariant",
     "V5DynamicVariant",
-    "VariantConfig",
-    "VariantType",
-    "build_ablated_profiles",
 ]

@@ -1,7 +1,6 @@
 """Evaluation harness for benchmarking specialist agent variants against baselines."""
 
 from lekka_ai.eval.dataset import EvalExample, load_dataset, save_dataset
-from lekka_ai.eval.eval_all import run_full_evaluation
 from lekka_ai.eval.grader import (
     ExtractedNumber,
     GradeResult,
@@ -58,7 +57,7 @@ from lekka_ai.eval.variant import (
     Variant,
 )
 from lekka_ai.eval.variants import (
-    EngineVariant,
+    BaseEngineVariant,
     V3StaticVariant,
     V4DynamicVariant,
     V5DynamicVariant,
@@ -71,8 +70,8 @@ __all__ = [
     "AdversarialExpectedBehavior",
     "AgentVariant",
     "AgreementReport",
+    "BaseEngineVariant",
     "DirectVariant",
-    "EngineVariant",
     "EvalExample",
     "EvalRunner",
     "EvalSummary",
@@ -114,7 +113,6 @@ __all__ = [
     "numeric_accuracy_metric",
     "recovery_rate",
     "risk_recall",
-    "run_full_evaluation",
     "run_judge_validation",
     "save_dataset",
     "success_metric",
