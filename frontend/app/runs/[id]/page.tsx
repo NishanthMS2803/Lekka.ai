@@ -592,6 +592,14 @@ function RunDetailContent() {
           <span>New Research Query</span>
         </Link>
         <div className="flex items-center gap-3">
+          <Link
+            href={`/runs/${runId}/trace`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 transition-colors"
+            title="Inspect latency timeline, tool calls, retries, and budget allocation decisions"
+          >
+            <span>⏱️</span>
+            <span>Trace Viewer</span>
+          </Link>
           <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
             Run ID: {runId}
           </span>

@@ -532,6 +532,16 @@ export interface components {
              * @description Tool name if tool span
              */
             tool_name?: string | null;
+            /**
+             * Input Json
+             * @description Input arguments to tool or span
+             */
+            input_json?: unknown | null;
+            /**
+             * Output Json
+             * @description Output payload or return value
+             */
+            output_json?: unknown | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;

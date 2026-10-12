@@ -321,7 +321,29 @@ class OrchestrationEngine:
                     },
                 )
 
-            res = await raw_runner(task, scratch_dir)
+            if self.task_runner is not None and effective_budget is not None:
+                effective_budget.allocate(task)
+
+            if self.tracer:
+                async with self.tracer.span(
+                    f"agent:{task.agent_type}",
+                    span_type="agent",
+                    metadata={
+                        "task_id": task.task_id,
+                        "agent_type": task.agent_type,
+                        "priority": task.priority,
+                        "instruction": task.instruction,
+                    },
+                ) as agent_span:
+                    res = await raw_runner(task, scratch_dir)
+                    agent_span.status = res.status
+                    if res.error:
+                        agent_span.error = res.error
+            else:
+                res = await raw_runner(task, scratch_dir)
+
+            if self.task_runner is not None and effective_budget is not None:
+                effective_budget.reconcile(res)
 
             if self.event_bus and state.run_id:
                 tool_calls_count = res.usage.get("tool_calls", 0) if res.usage else 0

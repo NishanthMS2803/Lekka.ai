@@ -955,6 +955,26 @@
             "title": "Tool Name",
             "description": "Tool name if tool span"
           },
+          "input_json": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Json",
+            "description": "Input arguments to tool or span"
+          },
+          "output_json": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Json",
+            "description": "Output payload or return value"
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object",

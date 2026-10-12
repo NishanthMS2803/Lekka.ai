@@ -34,9 +34,12 @@ from lekka_ai.db.ledger import LedgerRepository
 from lekka_ai.db.repository import get_run as get_db_run
 from lekka_ai.events import EventBus
 from lekka_ai.llm.base import LLMClient
+from lekka_ai.logging import get_logger
 from lekka_ai.orchestrator.dispatch import TaskResult
 from lekka_ai.orchestrator.engine import RunOutcome, TaskRunnerCallable
 from lekka_ai.tools.base import ToolRegistry
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -303,28 +306,96 @@ async def get_run_events(
 async def get_run_trace(
     run_id: str,
     run_manager: Annotated[RunManager, Depends(get_run_manager)],
+    session: Annotated[Session | None, Depends(get_optional_db_session)] = None,
 ) -> RunTraceResponse:
     """Retrieve execution trace spans and resource consumption totals."""
     record = run_manager.get_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
-    spans_data = [
-        SpanResponse(
-            name=s.name,
-            id=str(s.id),
-            parent_id=str(s.parent_id) if s.parent_id else None,
-            start_time=s.start_time.isoformat(),
-            end_time=s.end_time.isoformat() if s.end_time else None,
-            latency_ms=s.latency_ms,
-            status=s.status,
-            error=s.error,
-            span_type=s.span_type,
-            tool_name=s.tool_name,
-            metadata=dict(s.metadata or {}),
-        )
-        for s in (record.tracer.spans if record.tracer else [])
-    ]
+    spans_data: list[SpanResponse] = []
+    if record.tracer and record.tracer.spans:
+        for s in record.tracer.spans:
+            input_val = (
+                s.input_json
+                if s.input_json is not None
+                else s.metadata.get("input_json")
+            )
+            output_val = (
+                s.output_json
+                if s.output_json is not None
+                else s.metadata.get("output_json")
+            )
+            spans_data.append(
+                SpanResponse(
+                    name=s.name,
+                    id=str(s.id),
+                    parent_id=str(s.parent_id) if s.parent_id else None,
+                    start_time=s.start_time.isoformat(),
+                    end_time=s.end_time.isoformat() if s.end_time else None,
+                    latency_ms=s.latency_ms,
+                    status=s.status,
+                    error=s.error,
+                    span_type=s.span_type,
+                    tool_name=s.tool_name,
+                    input_json=input_val,
+                    output_json=output_val,
+                    metadata=dict(s.metadata or {}),
+                )
+            )
+
+    # Reconcile or load tool calls from DB if available
+    if session is not None:
+        try:
+            run_uuid = uuid.UUID(run_id)
+            db_run = get_db_run(session, run_uuid)
+            if db_run and db_run.tasks:
+                # If spans_data is empty (e.g. loaded from DB), populate
+                # from DB agent runs and tool calls
+                if not spans_data:
+                    for task in db_run.tasks:
+                        for ar in task.agent_runs:
+                            agent_span = SpanResponse(
+                                name=f"agent:{task.agent_type}",
+                                id=str(ar.id),
+                                parent_id=None,
+                                start_time=(
+                                    ar.created_at or db_run.created_at
+                                ).isoformat(),
+                                end_time=(ar.finished_at).isoformat()
+                                if ar.finished_at
+                                else None,
+                                latency_ms=None,
+                                status=ar.status,
+                                error=None,
+                                span_type="agent",
+                                input_json=None,
+                                output_json=None,
+                                metadata={
+                                    "tokens_in": ar.tokens_in,
+                                    "tokens_out": ar.tokens_out,
+                                },
+                            )
+                            spans_data.append(agent_span)
+                            for tc in ar.tool_calls:
+                                tc_span = SpanResponse(
+                                    name=tc.tool_name,
+                                    id=str(tc.id),
+                                    parent_id=str(ar.id),
+                                    start_time=tc.created_at.isoformat(),
+                                    end_time=None,
+                                    latency_ms=tc.latency_ms,
+                                    status="error" if tc.error else "ok",
+                                    error=tc.error,
+                                    span_type="tool",
+                                    tool_name=tc.tool_name,
+                                    input_json=tc.input_json,
+                                    output_json=tc.output_json,
+                                    metadata={"cache_hit": tc.cache_hit},
+                                )
+                                spans_data.append(tc_span)
+        except Exception as e:
+            logger.warning("Trace DB enrichment failed", error=str(e))
 
     budget = record.budget_manager
     total_tokens = budget.used_tokens if budget else 0

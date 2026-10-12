@@ -181,6 +181,12 @@ class SpanResponse(BaseModel):
     error: str | None = Field(default=None, description="Error message if failed")
     span_type: str = Field(default="generic", description="Classification of span")
     tool_name: str | None = Field(default=None, description="Tool name if tool span")
+    input_json: Any | None = Field(
+        default=None, description="Input arguments to tool or span"
+    )
+    output_json: Any | None = Field(
+        default=None, description="Output payload or return value"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
