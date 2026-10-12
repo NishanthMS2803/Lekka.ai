@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval
+.PHONY: install lint typecheck test run db-up db-down db-logs ingest eval validate-datasets
 
 TICKER ?= AAPL
 VARIANTS ?= direct,single
@@ -35,4 +35,7 @@ ingest:
 
 eval:
 	uv run python -m lekka_ai.eval.cli --dataset $(DATASET) --variants $(VARIANTS) --output-dir $(OUTPUT_DIR)
+
+validate-datasets:
+	uv run python -m lekka_ai.eval.validate
 

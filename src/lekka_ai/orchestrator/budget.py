@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
 
@@ -14,7 +14,9 @@ from lekka_ai.harness.models import (
     Limits,
 )
 from lekka_ai.harness.profiles import load_agent_profile
-from lekka_ai.harness.runtime import AgentRunResult
+
+if TYPE_CHECKING:
+    from lekka_ai.harness.runtime import AgentRunResult
 from lekka_ai.logging import get_logger
 from lekka_ai.orchestrator.state import PlannedTask
 from lekka_ai.tracing import Span, Tracer
@@ -228,6 +230,8 @@ class RunBudget(Budget):
             Remaining Budget after charging actual consumption.
         """
         # 1. Extract metrics
+        from lekka_ai.harness.runtime import AgentRunResult
+
         tokens_in = 0
         tokens_out = 0
         tool_calls = 0
